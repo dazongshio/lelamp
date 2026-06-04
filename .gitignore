@@ -32,10 +32,7 @@ logs/
 *.out
 *.pid
 
-# Nested runtime repository local state
-lelamp_runtime/
-!lelamp_runtime/.env.example
-!lelamp_runtime/.env.*.example
+# Runtime local state
 lelamp_runtime/.env
 lelamp_runtime/.env.*
 !lelamp_runtime/.env.example
