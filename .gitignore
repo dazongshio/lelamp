@@ -1,3 +1,6 @@
+# OS-generated files
+.DS_Store
+
 # Python-generated files
 __pycache__/
 *.py[oc]
@@ -6,6 +9,41 @@ dist/
 wheels/
 *.egg-info
 
+# JavaScript/TypeScript frontend
+node_modules/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+
 # Virtual environments
 .venv
 .claude
+
+# Local secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+docs/tingwu-live-credentials.md
+
+# Local runtime output
+logs/
+*.log
+*.out
+*.pid
+
+# Nested runtime repository local state
+lelamp_runtime/
+!lelamp_runtime/.env.example
+!lelamp_runtime/.env.*.example
+lelamp_runtime/.env
+lelamp_runtime/.env.*
+!lelamp_runtime/.env.example
+!lelamp_runtime/.env.*.example
+lelamp_runtime/.venv*/
+lelamp_runtime/logs/
+lelamp_runtime/workspace/
+lelamp_runtime/projection_out/
+lelamp_runtime/memory/
+lelamp_runtime/desktop_artifacts/
+lelamp_runtime/*.pt

@@ -1,0 +1,15 @@
+[Unit]
+Description=LeLamp fixed web console on Tailscale
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/dazis/LeLamp/lelamp_runtime
+ExecStart=/home/dazis/LeLamp/scripts/start_fixed_console.sh
+Restart=always
+RestartSec=3
+StandardOutput=append:/home/dazis/LeLamp/lelamp_runtime/workspace/.web_console_fixed.log
+StandardError=append:/home/dazis/LeLamp/lelamp_runtime/workspace/.web_console_fixed.log
+
+[Install]
+WantedBy=default.target

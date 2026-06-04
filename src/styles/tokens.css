@@ -1,0 +1,37 @@
+:root {
+  --color-bg: #f6f7f9;
+  --color-canvas: #fcfcfd;
+  --color-sidebar: rgba(251, 252, 253, 0.92);
+  --color-sidebar-deep: rgba(242, 245, 248, 0.96);
+  --color-topbar: rgba(252, 252, 253, 0.9);
+  --color-card: rgba(255, 255, 255, 0.94);
+  --color-card-solid: #ffffff;
+  --color-surface: rgba(255, 255, 255, 0.72);
+  --color-surface-muted: rgba(242, 242, 247, 0.76);
+  --color-border: rgba(33, 37, 41, 0.13);
+  --color-border-soft: rgba(33, 37, 41, 0.08);
+  --color-text: #1d1d1f;
+  --color-muted: #6e6e73;
+  --color-subtle: #8e8e93;
+  --color-primary: #007aff;
+  --color-primary-dark: #0062cc;
+  --color-primary-soft: rgba(0, 122, 255, 0.1);
+  --color-success: #34c759;
+  --color-success-soft: rgba(52, 199, 89, 0.12);
+  --color-warning: #ff9500;
+  --color-warning-soft: rgba(255, 149, 0, 0.14);
+  --color-danger: #ff3b30;
+  --color-danger-soft: rgba(255, 59, 48, 0.12);
+  --color-gray: #8e8e93;
+  --color-gray-soft: rgba(142, 142, 147, 0.12);
+  --radius-card: 8px;
+  --radius-control: 8px;
+  --shadow-card: 0 1px 2px rgba(20, 24, 31, 0.04), 0 10px 24px rgba(20, 24, 31, 0.055);
+  --shadow-control: 0 1px 1px rgba(0, 0, 0, 0.04);
+  --focus-ring: 0 0 0 4px rgba(0, 122, 255, 0.16);
+  --sidebar-width: 232px;
+  --topbar-height: 58px;
+  --assistant-width: 360px;
+  --footer-height: 46px;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+}
