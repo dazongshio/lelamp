@@ -1,4 +1,4 @@
-import { appendQuery, request, requestWithMock } from "./client";
+import { appendQuery, readToken, request, requestWithMock } from "./client";
 import type { ApiResult, SharedFile, SharedFilesResponse, SharedPreviewResponse } from "./types";
 import { mockFiles } from "../data/mockFiles";
 
@@ -23,6 +23,13 @@ export interface SharedFilesParams {
 export function getSharedFiles(params: SharedFilesParams = {}): Promise<ApiResult<SharedFilesResponse>> {
   return requestWithMock<SharedFilesResponse>(
     appendQuery("/api/shared/files", { ...params }),
+    { shared_inbox: "/workspace/shared_inbox", files: mockFiles, total: mockFiles.length, page: 1, page_size: mockFiles.length },
+  );
+}
+
+export function getWorkspaceFiles(params: SharedFilesParams = {}): Promise<ApiResult<SharedFilesResponse>> {
+  return requestWithMock<SharedFilesResponse>(
+    appendQuery("/api/workspace/files", { ...params }),
     { shared_inbox: "/workspace/shared_inbox", files: mockFiles, total: mockFiles.length, page: 1, page_size: mockFiles.length },
   );
 }
@@ -68,4 +75,32 @@ export function getSharedPreview(filePath: string): Promise<ApiResult<SharedPrev
       download_only: true,
     },
   );
+}
+
+export function getWorkspacePreview(filePath: string): Promise<ApiResult<SharedPreviewResponse>> {
+  return requestWithMock<SharedPreviewResponse>(
+    appendQuery("/api/workspace/preview", { file: filePath }),
+    {
+      status: "backend_missing",
+      workspace_name: filePath,
+      name: filePath.split("/").pop() ?? filePath,
+      size_bytes: 0,
+      download_only: true,
+    },
+  );
+}
+
+export type FileSource = "shared_inbox" | "workspace";
+
+export function getFileViewUrl(source: FileSource, filePath: string): string {
+  return buildFileUrl(source === "workspace" ? "/api/workspace/file" : "/api/shared/file", filePath);
+}
+
+export function getFileDownloadUrl(source: FileSource, filePath: string): string {
+  return buildFileUrl(source === "workspace" ? "/api/workspace/download" : "/api/shared/download", filePath);
+}
+
+function buildFileUrl(path: string, filePath: string): string {
+  const token = readToken();
+  return appendQuery(path, { file: filePath, token: token || undefined });
 }

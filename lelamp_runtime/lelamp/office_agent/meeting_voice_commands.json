@@ -1,0 +1,110 @@
+{
+  "version": 1,
+  "defaults": {
+    "title": "LeLamp 实时会议",
+    "participants": ["Unknown"],
+    "max_seconds": 7200
+  },
+  "negation": {
+    "markers": ["不要", "别", "先不", "不用", "不要执行"],
+    "allowed_markers": ["停止会议", "结束会议", "关闭会议模式", "停止听写", "结束听写", "停止转写", "结束转写"]
+  },
+  "commands": [
+    {
+      "action": "meeting_status",
+      "label": "meeting_status",
+      "reply": "我检查一下会议状态。",
+      "markers": ["会议状态", "当前会议", "实时会议状态", "听悟状态", "听写状态", "转写状态", "会议进度", "会议是否在运行", "现在有会议吗", "有没有会议在运行", "会议运行情况", "会议记录状态"]
+    },
+    {
+      "action": "meeting_provider_status",
+      "label": "meeting_provider_status",
+      "reply": "我检查一下听悟会议服务。",
+      "markers": ["听悟服务状态", "听悟配置", "会议服务状态", "会议麦克风状态", "检查听悟", "检查会议服务", "检查会议麦克风", "检查听悟麦克风", "听悟能不能用"]
+    },
+    {
+      "action": "start_realtime_meeting",
+      "label": "start_realtime_meeting",
+      "reply": "已开始实时会议记录，AI 助手仍保持在线。",
+      "markers": ["开始会议", "启动会议", "会议开始", "开会", "开会了", "开始开会", "开始实时会议", "启动实时会议", "开始会议记录", "开启会议记录", "启动会议记录", "开始记录会议", "开始记录", "启动记录", "开始听悟会议", "启动听悟会议", "打开听悟会议", "开始听写", "开启听写", "启动听写", "开始转写", "开启转写", "启动转写", "实时转写", "记录会议", "录会议", "开始录会议", "开始会议转写"]
+    },
+    {
+      "action": "stop_realtime_meeting",
+      "label": "stop_realtime_meeting",
+      "reply": "已停止实时会议记录，AI 助手仍保持在线。",
+      "markers": ["停止会议", "结束会议", "停止实时会议", "结束实时会议", "停止会议记录", "结束会议记录", "关闭会议记录", "停止记录会议", "停止记录", "结束记录", "停止听悟会议", "结束听悟会议", "关闭听悟会议", "停止听写", "结束听写", "关闭听写", "停止转写", "结束转写", "关闭转写", "会议结束", "散会", "结束开会"]
+    },
+    {
+      "action": "fetch_realtime_minutes",
+      "label": "fetch_realtime_minutes",
+      "reply": "已开始拉取听悟 AI 会议结果。",
+      "markers": ["拉取会议纪要", "获取会议纪要", "同步会议纪要", "生成听悟纪要", "获取听悟纪要", "拉取听悟纪要", "整理听悟会议", "生成会议ai结果", "获取会议ai结果", "生成会议ai总结", "获取会议ai总结", "生成会议思维导图", "会议思维导图", "生成思维导图", "生成会议ppt", "会议ppt", "生成会议幻灯片", "会议问答", "生成会议问答", "会议智能纪要", "听悟智能纪要"]
+    },
+    {
+      "action": "enable_meeting_mode",
+      "label": "enable_meeting_mode",
+      "reply": "已开启本地会议模式。",
+      "markers": ["开启会议模式", "打开会议模式", "进入会议模式", "启用会议模式", "开启本地会议", "开始本地会议", "本地会议模式", "打开本地转写", "开启本地转写", "启用本地转写"]
+    },
+    {
+      "action": "disable_meeting_mode",
+      "label": "disable_meeting_mode",
+      "reply": "已关闭本地会议模式。",
+      "markers": ["关闭会议模式", "退出会议模式", "取消会议模式", "停用会议模式", "关闭本地会议", "结束本地会议", "关闭本地转写", "停止本地转写", "停用本地转写"]
+    },
+    {
+      "action": "local_realtime_status",
+      "label": "local_realtime_status",
+      "reply": "我检查一下本地实时转写。",
+      "markers": ["本地转写状态", "本地实时转写", "本地听写状态", "本地会议转写状态", "本地会议状态", "本地会议进度"]
+    },
+    {
+      "action": "export_transcript",
+      "label": "export_transcript",
+      "reply": "已导出会议转写。",
+      "markers": ["导出会议转写", "导出转写", "导出会议原文", "保存会议转写", "保存会议原文", "导出transcript", "保存transcript", "导出会议记录", "保存会议记录"]
+    },
+    {
+      "action": "generate_minutes",
+      "label": "generate_minutes",
+      "reply": "已生成会议纪要。",
+      "markers": ["生成会议纪要", "整理会议纪要", "做会议纪要", "生成纪要", "整理纪要", "总结会议内容", "会议内容总结", "会议总结", "总结这次会议", "整理这次会议", "把会议整理一下"]
+    },
+    {
+      "action": "extract_decisions",
+      "label": "extract_decisions",
+      "reply": "已提取会议决策。",
+      "markers": ["提取会议决策", "生成会议决策", "整理会议决策", "会议决策", "决策列表", "整理决策", "决策事项", "确认事项", "生成确认事项"]
+    },
+    {
+      "action": "extract_action_items",
+      "label": "extract_action_items",
+      "reply": "已提取会议待办。",
+      "markers": ["提取会议待办", "生成会议待办", "整理会议待办", "会议待办", "行动项", "会议行动项", "待办列表", "整理待办", "待办事项", "生成待办事项", "整理待办事项", "任务列表", "会议任务"]
+    },
+    {
+      "action": "create_reminders",
+      "label": "create_reminders",
+      "reply": "已根据会议待办生成提醒草稿。",
+      "markers": ["生成会议提醒", "创建会议提醒", "会议提醒", "待办提醒", "根据待办提醒", "生成提醒草稿", "把待办做成提醒", "会议任务提醒"]
+    },
+    {
+      "action": "create_followup_package",
+      "label": "create_followup_package",
+      "reply": "已生成会议跟进包。",
+      "markers": ["生成会议跟进", "生成跟进包", "会议跟进包", "会后跟进", "会后跟进包", "生成followup", "生成follow-up", "整理会后事项", "生成会后材料", "会议后续事项"]
+    },
+    {
+      "action": "render_projection_confirmation",
+      "label": "render_projection_confirmation",
+      "reply": "已生成会议投影确认页。",
+      "markers": ["会议投影确认", "投影会议确认", "投影决策待办", "显示会议确认", "展示会议确认", "投影会议结果", "显示会议结果", "展示会议结果", "投影会议待办", "投影会议决策"]
+    },
+    {
+      "action": "export_package",
+      "label": "export_package",
+      "reply": "已导出会议材料包。",
+      "markers": ["导出会议材料", "导出会议包", "导出跟进包", "打包会议材料", "下载会议材料", "打包会议包", "导出会后材料", "下载会后材料"]
+    }
+  ]
+}

@@ -64,6 +64,14 @@ export async function runScanProcess(filePath: string, options: { document_type?
   return { data, source: "api" };
 }
 
+export async function runScanEnhance(filePath: string): Promise<ApiResult<ScanResult>> {
+  const data = await request<ScanResult>("/api/scan/enhance", {
+    method: "POST",
+    body: JSON.stringify({ filename: filePath }),
+  });
+  return { data, source: "api" };
+}
+
 export async function checkScanCaptureReadiness(filePath: string): Promise<ApiResult<Record<string, unknown>>> {
   const data = await request<Record<string, unknown>>("/api/scan/capture-readiness", {
     method: "POST",

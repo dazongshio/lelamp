@@ -1,4 +1,4 @@
-import { CalendarCheck, FileText, Mail, Mic, PlayCircle, Square } from "lucide-react";
+import { Activity, BookOpen, CalendarCheck, CheckCircle2, ClipboardList, ExternalLink, FileStack, FileText, Mail, Mic, PlayCircle, Radio, Settings2, Square } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiClientError, apiErrorMessage } from "../api/client";
 import {
@@ -7,7 +7,6 @@ import {
   enableMeetingMode,
   exportMeetingLocalRealtimeTranscript,
   exportMeetingPackage,
-  confirmMeetingStep,
   fetchMeetingRealtimeMinutes,
   getMeetingJobs,
   getMeetingLocalRealtimeStatus,
@@ -25,29 +24,42 @@ import {
   startMeetingRealtime,
   stopMeetingRealtime,
 } from "../api/meeting";
-import { getSharedFiles } from "../api/shared";
+import { getSharedFiles, getWorkspacePreview } from "../api/shared";
 import { getTask, getTaskEvents } from "../api/tasks";
-import type { MeetingJob, MeetingLocalRealtimeResponse, MeetingModeStatus, MeetingProviderAcceptanceItem, MeetingProviderPreflight, MeetingProviderStatus, MeetingRealtimeStatus, MeetingStep, SharedFile, TaskRecord } from "../api/types";
+import { syncWorkspaceFileToWiki } from "../api/wiki";
+import type { DocmostSyncResponse, MeetingJob, MeetingLocalRealtimeResponse, MeetingModeStatus, MeetingProviderAcceptanceItem, MeetingProviderPreflight, MeetingProviderStatus, MeetingRealtimeStatus, MeetingStep, SharedFile, SharedPreviewResponse, TaskRecord } from "../api/types";
 import { Card } from "../components/Card";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
+import { WorkspaceFileViewer } from "../components/WorkspaceFileViewer";
 import "./pages.css";
 
 const meetingStepMeta = [
   { name: "realtime_capture", title: "实时会议采集", action: "采集", description: "树莓派麦克风采集并推送到通义听悟实时转写" },
   { name: "import_transcript", title: "导入转写", action: "导入", description: "把会议转写导入为会议作业" },
   { name: "minutes", title: "生成会议纪要", action: "纪要", description: "生成结构化会议摘要与输出文件" },
-  { name: "decisions", title: "提取决策", action: "决策", description: "从纪要或转写中抽取已确认决策" },
+  { name: "decisions", title: "提取决策", action: "决策", description: "从纪要或转写中抽取决策" },
   { name: "action_items", title: "提取行动项", action: "行动项", description: "抽取负责人、事项和后续状态" },
   { name: "followup", title: "生成会后邮件", action: "邮件", description: "生成会后跟进邮件草稿，不自动发送" },
   { name: "reminders", title: "创建提醒", action: "提醒", description: "创建本地提醒草稿，不自动同步外部日历" },
-  { name: "projection_confirmation", title: "投影确认", action: "投影", description: "生成投影确认卡，供显示器/投影预览" },
+  { name: "projection_confirmation", title: "投影预览", action: "投影", description: "生成显示器/投影预览页" },
 ];
 
 const realtimeActiveStatuses = ["starting", "running", "stopping", "finalizing"];
 
+const meetingInsightTabs = [
+  { id: "minutes", label: "纪要" },
+  { id: "actions", label: "待办" },
+  { id: "decisions", label: "决策" },
+  { id: "qa", label: "问答" },
+  { id: "ppt", label: "PPT" },
+  { id: "mindmap", label: "思维导图" },
+] as const;
+
+type MeetingInsightTab = typeof meetingInsightTabs[number]["id"];
+
 export function MeetingPage() {
-  const [message, setMessage] = useState("等待用户确认");
+  const [message, setMessage] = useState("等待用户操作");
   const [files, setFiles] = useState<SharedFile[]>([]);
   const [transcript, setTranscript] = useState("");
   const [jobs, setJobs] = useState<MeetingJob[]>([]);
@@ -77,6 +89,13 @@ export function MeetingPage() {
   const [emailRecipient, setEmailRecipient] = useState("待填写收件人");
   const [emailAuthorized, setEmailAuthorized] = useState(false);
   const [exportAuthorized, setExportAuthorized] = useState(false);
+  const [activeInsightTab, setActiveInsightTab] = useState<MeetingInsightTab>("minutes");
+  const [selectedArtifact, setSelectedArtifact] = useState<MeetingArtifact | null>(null);
+  const [artifactPreview, setArtifactPreview] = useState<SharedPreviewResponse | null>(null);
+  const [artifactPreviewBusy, setArtifactPreviewBusy] = useState(false);
+  const [artifactPreviewError, setArtifactPreviewError] = useState("");
+  const [wikiBusyPath, setWikiBusyPath] = useState("");
+  const [wikiResult, setWikiResult] = useState<DocmostSyncResponse | null>(null);
 
   const load = useCallback(async (preferredTranscript?: string, preferredMeetingId?: string) => {
     setError("");
@@ -89,7 +108,10 @@ export function MeetingPage() {
       const meetingModeResult = await getMeetingStatus();
       const localRealtimeResult = await getMeetingLocalRealtimeStatus();
       const sharedFiles = filesResult.data.files ?? [];
-      const nextTranscript = preferredTranscript || transcript || sharedFiles.find((file) => isTranscriptLike(file))?.relative_path || sharedFiles[0]?.relative_path || "";
+      const nextTranscriptFiles = sharedFiles.filter(isTranscriptLike);
+      const preferredTranscriptUsable = preferredTranscript && isTranscriptPathLike(preferredTranscript) ? preferredTranscript : "";
+      const currentTranscriptUsable = transcript && isTranscriptPathLike(transcript) ? transcript : "";
+      const nextTranscript = preferredTranscriptUsable || currentTranscriptUsable || nextTranscriptFiles[0]?.relative_path || "";
       const nextJobs = jobsResult.data.items;
       const providerMeetingId = providerResult.data.providers.tongyi_tingwu.active_meeting_id ?? undefined;
       const nextActiveJob = findJobForTranscript(nextJobs, nextTranscript, preferredMeetingId ?? providerMeetingId) ?? nextJobs[0] ?? null;
@@ -177,7 +199,9 @@ export function MeetingPage() {
   const decisions = meetingResultItems(displayResult, "decisions");
   const actionItems = meetingResultItems(displayResult, "action_items");
   const outputs = outputPaths(displayResult);
+  const artifacts = meetingArtifacts(displayResult, activeJob, realtime);
   const diagnostics = realtimeDiagnostics(displayResult, realtime);
+  const agentEvents = tingwuAgentEvents(displayResult, realtime);
   const realtimeStatus = String(realtime?.status ?? "idle");
   const realtimeMeetingId = realtime?.meeting_id ?? providerStatus?.providers.tongyi_tingwu.active_meeting_id;
   const realtimeControlsBusy = realtimeBusy || registeringTerminalOutputs;
@@ -188,10 +212,16 @@ export function MeetingPage() {
   const preflightChecks = providerPreflightChecks(providerPreflight);
   const transcriptLines = realtimeTranscriptLines(realtime);
   const minutesReady = Boolean(resultSummary || diagnostics.tingwuMinutesPath || diagnostics.openclawMinutesPath);
+  const tingwuCapabilities = providerStatus?.providers.tongyi_tingwu.capabilities ?? {};
+  const enabledCapabilityCount = Object.values(tingwuCapabilities).filter(Boolean).length;
+  const providerReady = providerStatus?.providers.tongyi_tingwu.status ?? "needs_config";
+  const localSpeakerCounts = cleanSpeakerCounts(localRealtime?.speaker_counts);
+  const transcriptFiles = useMemo(() => files.filter(isTranscriptLike), [files]);
+  const canUseSelectedTranscript = Boolean(transcript && isTranscriptPathLike(transcript));
 
   async function run(label: string, stepId: number, action: () => Promise<{ data: Record<string, unknown> | MeetingJob }>) {
-    if (!transcript) {
-      setError("请先上传或选择会议转写文件。");
+    if (!canUseSelectedTranscript) {
+      setError("请选择可读的会议转写文件，或在中间输入会议文本后导入。");
       return;
     }
     setError("");
@@ -290,6 +320,32 @@ export function MeetingPage() {
       setMessage("导出本地实时 transcript 失败");
     } finally {
       setLocalRealtimeBusy(false);
+    }
+  }
+
+  async function syncArtifactToWiki(artifact: MeetingArtifact | null) {
+    if (!artifact?.workspaceName) {
+      setError("请选择一个会议产物。");
+      return;
+    }
+    setError("");
+    setWikiBusyPath(artifact.workspaceName);
+    setMessage("正在同步会议产物到 Wiki...");
+    try {
+      const response = await syncWorkspaceFileToWiki({
+        filePath: artifact.workspaceName,
+        title: artifact.label.replace(/\s*·\s*.*/, "") || artifact.workspaceName.split("/").pop() || "会议产物",
+      });
+      setWikiResult(response.data);
+      setMessage(`会议产物已同步到 Wiki：${response.data.docmost_page_title}`);
+      if (response.data.docmost_page_url) {
+        window.open(response.data.docmost_page_url, "_blank", "noopener,noreferrer");
+      }
+    } catch (err) {
+      setError(apiErrorMessage(err));
+      setMessage("同步会议产物到 Wiki 失败");
+    } finally {
+      setWikiBusyPath("");
     }
   }
 
@@ -411,8 +467,8 @@ export function MeetingPage() {
   }
 
   async function exportFollowupPackage() {
-    if (!transcript) {
-      setError("请先选择会议转写文件。");
+    if (!canUseSelectedTranscript) {
+      setError("请选择可读的会议转写文件，或在中间输入会议文本后导入。");
       return;
     }
     setError("");
@@ -432,8 +488,8 @@ export function MeetingPage() {
   }
 
   async function sendFollowupEmail() {
-    if (!transcript) {
-      setError("请先选择会议转写文件。");
+    if (!canUseSelectedTranscript) {
+      setError("请选择可读的会议转写文件，或在中间输入会议文本后导入。");
       return;
     }
     setError("");
@@ -449,26 +505,6 @@ export function MeetingPage() {
     } catch (err) {
       setError(apiErrorMessage(err));
       setMessage("发送会后邮件失败");
-    }
-  }
-
-  async function confirmActiveStep() {
-    const step = workflowSteps.find((item) => item.id === activeStepId);
-    const taskId = step?.taskId;
-    if (!taskId) {
-      setError("当前步骤没有可确认的任务。");
-      return;
-    }
-    setError("");
-    setMessage("正在确认会议步骤...");
-    try {
-      const response = await confirmMeetingStep(taskId);
-      setLastResult(response.data);
-      setMessage("会议步骤已确认。");
-      await load(transcript);
-    } catch (err) {
-      setError(apiErrorMessage(err));
-      setMessage("会议步骤确认失败");
     }
   }
 
@@ -494,11 +530,30 @@ export function MeetingPage() {
     }
   }
 
+  async function openMeetingArtifact(artifact: MeetingArtifact) {
+    setSelectedArtifact(artifact);
+    setArtifactPreview(null);
+    setArtifactPreviewError("");
+    if (!artifact.workspaceName) {
+      setArtifactPreviewError("这个产物不在 workspace 内，不能直接预览。");
+      return;
+    }
+    setArtifactPreviewBusy(true);
+    try {
+      const response = await getWorkspacePreview(artifact.workspaceName);
+      setArtifactPreview(response.data);
+    } catch (err) {
+      setArtifactPreviewError(apiErrorMessage(err));
+    } finally {
+      setArtifactPreviewBusy(false);
+    }
+  }
+
   return (
     <>
       <PageHeader
-        title="会议助手"
-        description="实时记录、导入转写、生成纪要、整理会后动作"
+        title="实时会议"
+        description="录音转写、说话人分离、AI 纪要和会后动作"
         actions={
           <div className="meeting-header-actions">
             <StatusBadge status={meetingMode?.meeting_mode_enabled ? "enabled" : "blocked"} label={meetingMode?.meeting_mode_enabled ? "会议理解已开启" : "默认不解析"} />
@@ -509,27 +564,80 @@ export function MeetingPage() {
       <div className="meeting-workbench">
         {error && <div className="danger-panel">操作失败：{error}</div>}
 
-        <section className="meeting-hero">
-          <Card className="meeting-hero__primary" title="实时会议" subtitle="先开启会议模式，再开始采集。系统默认不会解析投影内容。" action={<StatusBadge status={realtime?.status ?? "idle"} label={friendlyStatus(realtime?.status ?? "idle")} />}>
-            <div className="meeting-quick-stats">
+        <section className="meeting-app-shell">
+          <aside className="meeting-app-sidebar" aria-label="会议列表">
+            <div className="meeting-pane-header">
               <div>
-                <span>会议模式</span>
-                <strong>{meetingMode?.meeting_mode_enabled ? "已开启" : "未开启"}</strong>
+                <span>会议列表</span>
+                <strong>{jobs.length} 场会议</strong>
               </div>
+              <StatusBadge status={transcript ? "available" : "pending"} label={transcript ? "已选择" : "待导入"} />
+            </div>
+            <div className="meeting-list">
+              {jobs.length ? jobs.map((job) => (
+                <button
+                  className={`meeting-list-item ${job.job_id === activeJob?.job_id ? "meeting-list-item--active" : ""}`}
+                  key={job.job_id}
+                  onClick={() => void selectMeetingJob(job.job_id)}
+                  type="button"
+                >
+                  <strong>{compactDisplayPath(job.title || job.transcript || job.job_id)}</strong>
+                  <span>{compactDisplayPath(job.transcript)}</span>
+                  <StatusBadge status={job.status} label={friendlyStatus(job.status)} />
+                </button>
+              )) : (
+                <div className="meeting-empty-state">暂无会议记录</div>
+              )}
+            </div>
+            <div className="meeting-sidebar-section">
+              <span className="small muted">会议资料</span>
+              <select className="select" value={transcript} onChange={(event) => setTranscript(event.target.value)}>
+                {transcriptFiles.map((file) => <option value={file.relative_path} key={file.relative_path}>{compactFileLabel(file.name)}</option>)}
+                {!transcriptFiles.length && <option value="">暂无转写文件</option>}
+              </select>
+              {!transcriptFiles.length && <p className="small muted">PDF、图片、扫描件请在文档页查看；会议页只导入 txt/md/json 转写文本。</p>}
+              <button className="ghost-button" onClick={() => void run("导入转写", 2, () => importTranscript(transcript, transcript.split("/").pop()))} disabled={!canUseSelectedTranscript}>
+                <PlayCircle size={16} />
+                导入为会议
+              </button>
+            </div>
+            <div className="meeting-sidebar-section">
+              <span className="small muted">听悟能力</span>
+              <TingwuCapabilityPanel providerStatus={providerStatus} compact />
+            </div>
+          </aside>
+
+          <main className="meeting-live-pane">
+            <div className="meeting-live-topbar">
               <div>
-                <span>麦克风</span>
-                <strong>{friendlyMicStatus(tingwuMicStatus(providerStatus))}</strong>
+                <span>当前会议</span>
+                <h2>{activeJob?.title ?? meetingTitle}</h2>
               </div>
-              <div>
-                <span>采集时长</span>
-                <strong>{formatSeconds(realtime?.audio_seconds)}</strong>
-              </div>
-              <div>
-                <span>转写条数</span>
-                <strong>{realtime?.final_count ?? localRealtime?.turn_count ?? 0}</strong>
+              <div className="meeting-live-badges">
+                <StatusBadge status={meetingMode?.meeting_mode_enabled ? "enabled" : "blocked"} label={meetingMode?.meeting_mode_enabled ? "会议模式" : "未开启"} />
+                <StatusBadge status={realtime?.status ?? "idle"} label={friendlyStatus(realtime?.status ?? "idle")} />
               </div>
             </div>
-            <div className="meeting-form-grid">
+
+            <div className="meeting-console-status meeting-app-status">
+              <div className="meeting-status-tile">
+                <span>听悟链路</span>
+                <strong>{friendlyStatus(providerReady)}</strong>
+                <small>{enabledCapabilityCount} 项能力开启</small>
+              </div>
+              <div className="meeting-status-tile">
+                <span>麦克风</span>
+                <strong>{friendlyMicStatus(tingwuMicStatus(providerStatus))}</strong>
+                <small>{compactText(providerStatus?.providers.tongyi_tingwu.selected_mic_device ?? providerStatus?.providers.tongyi_tingwu.configured_mic_device ?? "-", 32)}</small>
+              </div>
+              <div className="meeting-status-tile">
+                <span>采集</span>
+                <strong>{formatSeconds(realtime?.audio_seconds)}</strong>
+                <small>{realtime?.final_count ?? localRealtime?.turn_count ?? 0} 条转写</small>
+              </div>
+            </div>
+
+            <div className="meeting-form-grid meeting-live-form">
               <label>
                 <span>会议标题</span>
                 <input className="input" value={meetingTitle} onChange={(event) => setMeetingTitle(event.target.value)} placeholder="会议标题" />
@@ -539,8 +647,12 @@ export function MeetingPage() {
                 <input className="input" value={participants} onChange={(event) => setParticipants(event.target.value)} placeholder="用逗号分隔" />
               </label>
             </div>
-            <div className="meeting-card-actions">
-              <button className="primary-button" onClick={() => void setMeetingModeEnabled(true)}>一键进入会议模式</button>
+
+            <div className="meeting-command-row meeting-live-actions">
+              <button className="secondary-button" onClick={() => void setMeetingModeEnabled(true)}>
+                <CheckCircle2 size={16} />
+                进入会议模式
+              </button>
               <button className="ghost-button" onClick={() => void setMeetingModeEnabled(false)}>退出会议模式</button>
               <button className="primary-button" onClick={() => void startRealtime()} disabled={realtimeControlsBusy || realtimeActive}>
                 <Mic size={16} /> 开始实时会议
@@ -552,190 +664,172 @@ export function MeetingPage() {
                 拉取 AI 纪要
               </button>
             </div>
-            <p className="small muted">“总结这一页 PPT”需要在投影页主动授权屏幕捕获；会议助手不会被动读取投影内容。</p>
-          </Card>
 
-          <Card title="当前进度" action={<StatusBadge status={activeJob?.status ?? "pending"} label={friendlyStatus(activeJob?.status ?? "pending")} />}>
-            <div className="meeting-progress-list">
-              {workflowSteps.slice(0, 6).map((step) => (
+            <div className="meeting-transcript-panel">
+              <div className="meeting-pane-header">
+                <div>
+                  <span>实时转写</span>
+                  <strong>{transcriptLines.length} 条记录</strong>
+                </div>
+                <StatusBadge status={transcriptLines.length ? "available" : "pending"} label={transcriptLines.length ? "有内容" : "等待"} />
+              </div>
+              <div className="realtime-transcript realtime-transcript--app">
+                {transcriptLines.length ? transcriptLines.map((line) => <p key={line}>{line}</p>) : <p className="small muted">等待实时转写，或导入已有会议资料。</p>}
+              </div>
+            </div>
+
+            <div className="meeting-lower-grid">
+              <div className="meeting-text-card meeting-inline-panel">
+                <div className="meeting-pane-header">
+                  <div>
+                    <span>粘贴文本</span>
+                    <strong>导入会议内容</strong>
+                  </div>
+                </div>
+                <textarea
+                  className="textarea meeting-text-card__textarea"
+                  value={meetingText}
+                  onChange={(event) => setMeetingText(event.target.value)}
+                  placeholder="粘贴会议转写、录音识别结果或会议笔记"
+                />
+                <div className="meeting-card-actions">
+                  <button className="secondary-button" onClick={() => void importMeetingTextContent()} disabled={meetingTextImporting}>
+                    {meetingTextImporting ? "导入中..." : "导入会议文本"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="local-realtime-card meeting-inline-panel">
+                <div className="meeting-pane-header">
+                  <div>
+                    <span>手动发言</span>
+                    <strong>分角色补录</strong>
+                  </div>
+                  <StatusBadge status={localRealtime?.meeting_mode_enabled ? "enabled" : "blocked"} label={localRealtime?.meeting_mode_enabled ? "可记录" : "需开启"} />
+                </div>
+                <div className="local-realtime-form">
+                  <input className="input" value={localSpeaker} onChange={(event) => setLocalSpeaker(event.target.value)} placeholder="发言人" />
+                  <textarea className="textarea" value={localTurnText} onChange={(event) => setLocalTurnText(event.target.value)} placeholder="补充一句发言" />
+                  <button className="primary-button" onClick={() => void appendLocalRealtimeTurn()} disabled={localRealtimeBusy || !meetingMode?.meeting_mode_enabled}>追加发言</button>
+                  <button className="ghost-button" onClick={() => void exportLocalRealtime()} disabled={localRealtimeBusy || !localRealtime?.turn_count}>导出转写</button>
+                </div>
+                <div className="speaker-counts">
+                  {Object.entries(localSpeakerCounts).map(([speaker, count]) => (
+                    <span key={speaker}>{speaker}: {count}</span>
+                  ))}
+                  {!Object.keys(localSpeakerCounts).length && <span className="small muted">暂无分角色发言。</span>}
+                </div>
+              </div>
+            </div>
+          </main>
+
+          <aside className="meeting-ai-pane" aria-label="AI 结果">
+            <div className="meeting-pane-header">
+              <div>
+                <span>AI 结果</span>
+                <strong>{minutesReady ? "已生成" : "待生成"}</strong>
+              </div>
+              <StatusBadge status={minutesReady ? "completed" : "pending"} label={minutesReady ? "已生成" : "待生成"} />
+            </div>
+            <div className="meeting-insight-tabs" role="tablist" aria-label="会议 AI 结果">
+              {meetingInsightTabs.map((tab) => (
                 <button
-                  className={`meeting-progress-item ${step.id === activeStep.id ? "meeting-progress-item--active" : ""}`}
-                  key={step.id}
-                  onClick={() => setActiveStepId(step.id)}
+                  className={tab.id === activeInsightTab ? "selected" : ""}
+                  key={tab.id}
+                  onClick={() => {
+                    setActiveInsightTab(tab.id);
+                    setSelectedArtifact(null);
+                    setArtifactPreview(null);
+                    setArtifactPreviewError("");
+                  }}
+                  role="tab"
                   type="button"
                 >
-                  <span>{step.id}</span>
-                  <strong>{step.title}</strong>
-                  <StatusBadge status={step.status} label={friendlyStatus(step.status)} />
+                  {tab.label}
                 </button>
               ))}
             </div>
-          </Card>
-        </section>
-
-        <section className="meeting-main-grid">
-          <Card title="会议资料" subtitle="选择已上传的录音转写，或直接粘贴会议文本。" action={<StatusBadge status={transcript ? "available" : "pending"} label={transcript ? "已选择" : "待导入"} />}>
-            <div className="meeting-file-picker">
-              <span className="meeting-file-picker__icon"><FileText size={22} /></span>
-              <div className="meeting-file-picker__content">
-                <strong>{transcript ? compactDisplayPath(transcript) : "暂无会议资料"}</strong>
-                <select className="select" value={transcript} onChange={(event) => setTranscript(event.target.value)}>
-                  {files.map((file) => <option value={file.relative_path} key={file.relative_path}>{compactFileLabel(file.name)}</option>)}
-                </select>
-              </div>
-              <StatusBadge status={transcript ? "available" : "pending"} />
+            <MeetingInsightPanel
+              activeTab={activeInsightTab}
+              actionItems={actionItems}
+              artifacts={artifacts}
+              decisions={decisions}
+              diagnostics={diagnostics}
+              onOpenArtifact={(artifact) => void openMeetingArtifact(artifact)}
+              outputs={outputs}
+              preview={artifactPreview}
+              previewBusy={artifactPreviewBusy}
+              previewError={artifactPreviewError}
+              resultSummary={resultSummary}
+              selectedArtifact={selectedArtifact}
+            />
+            <div className="meeting-wiki-actions">
+              <button className="ghost-button" onClick={() => void syncArtifactToWiki(selectedArtifact)} disabled={!selectedArtifact || wikiBusyPath === selectedArtifact.workspaceName}>
+                <BookOpen size={16} />
+                {wikiBusyPath === selectedArtifact?.workspaceName ? "同步中..." : "同步选中产物到 Wiki"}
+              </button>
+              {wikiResult?.docmost_page_url && (
+                <a className="link-blue" href={wikiResult.docmost_page_url} target="_blank" rel="noreferrer">
+                  <ExternalLink size={16} /> 打开最近同步页面
+                </a>
+              )}
             </div>
-            <div className="meeting-card-actions">
-              <button className="ghost-button" onClick={() => void run("导入转写", 2, () => importTranscript(transcript, transcript.split("/").pop()))} disabled={!transcript}>
-                <PlayCircle size={16} />
-                导入为会议
+            <div className="meeting-ai-actions">
+              <button className="secondary-button" onClick={() => void run("生成会议纪要", 3, () => runMeetingMinutes(transcript))} disabled={!canUseSelectedTranscript}>
+                <ClipboardList size={16} />
+                生成纪要
+              </button>
+              <button className="ghost-button" onClick={() => void run("提取决策", 4, () => runMeetingStep("decisions", { file_path: transcript, job_id: activeJob?.job_id }))} disabled={!canUseSelectedTranscript}>
+                提取决策
+              </button>
+              <button className="ghost-button" onClick={() => void run("提取行动项", 5, () => runMeetingStep("action-items", { file_path: transcript, job_id: activeJob?.job_id }))} disabled={!canUseSelectedTranscript}>
+                提取行动项
+              </button>
+              <button className="primary-button" onClick={() => void run("生成会后资料", 6, () => runMeetingFollowup(transcript))} disabled={!canUseSelectedTranscript}>
+                <FileStack size={16} />
+                会后资料
               </button>
             </div>
-            <div className="meeting-job-selector">
-              <span className="small muted">当前会议</span>
-              <select
-                className="select"
-                value={activeJob?.job_id ?? ""}
-                onChange={(event) => void selectMeetingJob(event.target.value)}
-                disabled={!jobs.length}
-              >
-                {!jobs.length && <option value="">暂无会议记录</option>}
-                {jobs.map((job) => (
-                  <option key={job.job_id} value={job.job_id}>
-                    {compactJobLabel(job)}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="meeting-summary-grid">
-              <span>主题</span><strong>{activeJob?.title ?? meetingTitle}</strong>
-              <span>状态</span><strong>{friendlyStatus(activeJob?.status ?? "pending")}</strong>
-              <span>步骤</span><strong>{activeStep.title}</strong>
-              <span>会议数</span><strong>{jobs.length}</strong>
-            </div>
-          </Card>
-
-          <Card title="粘贴会议文本" subtitle="只处理用户主动提供的内容。" action={<StatusBadge status="available" label="可用" />}>
-            <div className="meeting-text-card">
-              <textarea
-                className="textarea meeting-text-card__textarea"
-                value={meetingText}
-                onChange={(event) => setMeetingText(event.target.value)}
-                placeholder="粘贴会议转写、录音识别结果或会议笔记"
-              />
-              <div className="meeting-card-actions">
-                <button className="secondary-button" onClick={() => void importMeetingTextContent()} disabled={meetingTextImporting}>
-                  {meetingTextImporting ? "导入中..." : "导入会议文本"}
-                </button>
+            <div className="meeting-email-panel">
+              <div className="row">
+                <Mail size={16} />
+                <strong>会后邮件</strong>
               </div>
-              <p className="small muted">导入后可继续生成纪要、行动项、邮件草稿和投影确认页。</p>
-            </div>
-          </Card>
-
-          <Card title="手动补充分角色发言" subtitle="用于没有麦克风输入时补录关键发言。" action={<StatusBadge status={localRealtime?.meeting_mode_enabled ? "enabled" : "blocked"} label={localRealtime?.meeting_mode_enabled ? "可记录" : "需开启会议模式"} />}>
-            <div className="local-realtime-card">
-              <div className="local-realtime-form">
-                <input className="input" value={localSpeaker} onChange={(event) => setLocalSpeaker(event.target.value)} placeholder="发言人" />
-                <textarea className="textarea" value={localTurnText} onChange={(event) => setLocalTurnText(event.target.value)} placeholder="补充一句发言" />
-                <button className="primary-button" onClick={() => void appendLocalRealtimeTurn()} disabled={localRealtimeBusy || !meetingMode?.meeting_mode_enabled}>追加发言</button>
-                <button className="ghost-button" onClick={() => void exportLocalRealtime()} disabled={localRealtimeBusy || !localRealtime?.turn_count}>导出转写</button>
-              </div>
-              <div className="speaker-counts">
-                {Object.entries(localRealtime?.speaker_counts ?? {}).map(([speaker, count]) => (
-                  <span key={speaker}>{speaker}: {count}</span>
-                ))}
-                {!Object.keys(localRealtime?.speaker_counts ?? {}).length && <span className="small muted">暂无分角色发言。</span>}
-              </div>
-            </div>
-          </Card>
-        </section>
-
-        <section className="meeting-action-strip">
-          <button className="secondary-button" onClick={() => void run("生成会议纪要", 3, () => runMeetingMinutes(transcript))} disabled={!transcript}>
-            生成会议纪要
-          </button>
-          <button className="ghost-button" onClick={() => void run("提取决策", 4, () => runMeetingStep("decisions", { file_path: transcript, job_id: activeJob?.job_id }))} disabled={!transcript}>
-            提取决策
-          </button>
-          <button className="ghost-button" onClick={() => void run("提取行动项", 5, () => runMeetingStep("action-items", { file_path: transcript, job_id: activeJob?.job_id }))} disabled={!transcript}>
-            提取行动项
-          </button>
-          <button className="primary-button" onClick={() => void run("生成会后资料", 6, () => runMeetingFollowup(transcript))} disabled={!transcript}>
-            生成会后资料
-          </button>
-          <button className="primary-button" onClick={() => void generateEmailDraftOnly()} disabled={!transcript}>
-            只生成邮件草稿
-          </button>
-          <button className="ghost-button" onClick={() => void run("创建提醒", 7, () => runMeetingStep("reminders", { file_path: transcript, job_id: activeJob?.job_id }))} disabled={!transcript}>
-            创建提醒
-          </button>
-          <button className="ghost-button" onClick={() => void run("投影确认", 8, () => runMeetingStep("projection-confirmation", { file_path: transcript, job_id: activeJob?.job_id }))} disabled={!transcript}>
-            投影确认
-          </button>
-        </section>
-
-        <section className="meeting-results">
-          <Card title="实时转写" action={<StatusBadge status={transcriptLines.length ? "available" : "pending"} label={`${transcriptLines.length} 条`} />}>
-            <div className="realtime-transcript">
-              {transcriptLines.length ? transcriptLines.map((line) => <p key={line}>{line}</p>) : <p className="small muted">等待实时转写，或导入已有会议资料。</p>}
-            </div>
-          </Card>
-
-          <Card title="会议纪要" action={<StatusBadge status={minutesReady ? "completed" : "pending"} label={minutesReady ? "已生成" : "待生成"} />}>
-            <ul className="dense-list">
-              <li>{resultSummary || "尚未生成会议纪要。"}</li>
-              <li>邮件、导出和发送都需要显式授权。</li>
-              <li>会议理解模式关闭时不会处理投影内容。</li>
-            </ul>
-          </Card>
-
-          <Card title="决策">
-            <ol className="dense-list">
-              {(decisions.length ? decisions : ["等待生成纪要或人工确认。"]).map((item) => <li key={item}>{item}</li>)}
-            </ol>
-          </Card>
-
-          <Card title="行动项">
-            <div className="mini-table-wrap">
-              <table className="mini-table">
-                <tbody>
-                  <tr><th>#</th><th>行动项</th><th>状态</th></tr>
-                  {(actionItems.length ? actionItems : ["等待生成会后资料。"]).map((item, index) => (
-                    <tr key={item}><td>{index + 1}</td><td>{item}</td><td>草稿/待确认</td></tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-
-          <Card title="会后邮件" action={<Mail size={18} color="var(--color-primary)" />}>
-            <div className="office-api-card">
-              <span>根据当前会议内容生成邮件草稿；导出或发送前需要用户授权。</span>
               <input className="input" value={emailRecipient} onChange={(event) => setEmailRecipient(event.target.value)} placeholder="收件人" />
-              <button className="primary-button" onClick={() => void generateEmailDraftOnly()} disabled={!transcript}>生成邮件草稿</button>
               <label className="inline-check">
                 <input type="checkbox" checked={exportAuthorized} onChange={(event) => setExportAuthorized(event.target.checked)} />
-                <span>授权导出会后资料</span>
+                <span>授权导出资料</span>
               </label>
-              <button className="ghost-button" onClick={() => void exportFollowupPackage()} disabled={!transcript}>导出资料</button>
+              <button className="ghost-button" onClick={() => void exportFollowupPackage()} disabled={!canUseSelectedTranscript}>导出资料</button>
               <label className="inline-check">
                 <input type="checkbox" checked={emailAuthorized} onChange={(event) => setEmailAuthorized(event.target.checked)} />
                 <span>授权发送邮件</span>
               </label>
-              <button className="danger-button" onClick={() => void sendFollowupEmail()} disabled={!transcript}>发送邮件</button>
+              <button className="danger-button" onClick={() => void sendFollowupEmail()} disabled={!canUseSelectedTranscript}>发送邮件</button>
             </div>
-          </Card>
+          </aside>
+        </section>
 
-          <Card title="输出文件">
-            <div className="meeting-output-list">
-              {(outputs.length ? outputs : ["等待生成会议输出。"]).map((item) => (
-                <span className="result-file" key={item}>
-                  <FileText size={16} />
-                  <span>{compactDisplayPath(item)}</span>
-                </span>
-              ))}
-            </div>
-          </Card>
+        <section className="meeting-process-panel" aria-label="Meeting workflow">
+          <div className="meeting-section-heading">
+            <span>流程</span>
+            <strong>{activeStep.title}</strong>
+            <StatusBadge status={activeJob?.status ?? "pending"} label={friendlyStatus(activeJob?.status ?? "pending")} />
+          </div>
+          <div className="meeting-progress-list">
+            {workflowSteps.slice(0, 8).map((step) => (
+              <button
+                className={`meeting-progress-item ${step.id === activeStep.id ? "meeting-progress-item--active" : ""}`}
+                key={step.id}
+                onClick={() => setActiveStepId(step.id)}
+                type="button"
+              >
+                <span>{step.id}</span>
+                <strong>{step.title}</strong>
+                <StatusBadge status={step.status} label={friendlyStatus(step.status)} />
+              </button>
+            ))}
+          </div>
         </section>
 
         <Card title="当前反馈" action={<StatusBadge status={String(lastResult?.status ?? activeJob?.status ?? "pending")} label={friendlyStatus(lastResult?.status ?? activeJob?.status ?? "pending")} />}>
@@ -755,11 +849,15 @@ export function MeetingPage() {
                 <span>实际麦克风</span><strong>{providerStatus?.providers.tongyi_tingwu.selected_mic_device ?? "-"}</strong>
                 <span>麦克风状态</span><StatusBadge status={tingwuMicStatus(providerStatus)} />
                 <span>采样率</span><strong>{providerStatus?.providers.tongyi_tingwu.sample_rate ?? 16000} Hz · {providerStatus?.providers.tongyi_tingwu.audio_format ?? "pcm"}</strong>
+                <span>识别/分析模型</span><strong>{providerStatus?.providers.tongyi_tingwu.transcription_model ?? "-"} · {providerStatus?.providers.tongyi_tingwu.analysis_model ?? "-"}</strong>
+                <span>翻译</span><strong>{providerStatus?.providers.tongyi_tingwu.translation_enabled ? (providerStatus.providers.tongyi_tingwu.translation_target_lang ?? []).join(", ") || "enabled" : "off"}</strong>
+                <span>热词库</span><strong>{providerStatus?.providers.tongyi_tingwu.phrase_id_configured ? "phraseId 已配置" : (providerStatus?.providers.tongyi_tingwu.hot_words_configured ? "仅本地热词备注" : "-")}</strong>
                 <span>HTTP 端点</span><strong>{providerStatus?.providers.tongyi_tingwu.http_url ?? "-"}</strong>
                 <span>WS 端点</span><strong>{providerStatus?.providers.tongyi_tingwu.ws_url ?? "-"}</strong>
                 <span>麦克风诊断</span><strong>{tingwuMicMessage(providerStatus)}</strong>
                 <span>状态</span><StatusBadge status={realtime?.status ?? "idle"} label={String(realtime?.status ?? "idle")} />
               </div>
+              <TingwuCapabilityPanel providerStatus={providerStatus} />
               <div className="realtime-monitor" aria-label="Realtime capture monitor">
                 <div><span>采集时长</span><strong>{formatSeconds(realtime?.audio_seconds)} / {Number(realtime?.websocket_audio_frames ?? 0)} 帧</strong></div>
                 <div><span>最终转写</span><strong>{realtime?.final_count ?? 0}</strong></div>
@@ -812,7 +910,7 @@ export function MeetingPage() {
                 {(realtimeEvents.length ? realtimeEvents : [{ event: "idle", timestamp: "-", status: realtime?.status ?? "idle" }]).slice(0, 8).map((event, index) => (
                   <span className="result-file" key={`${String(event.event ?? "event")}-${index}`}>
                     <CalendarCheck size={16} />
-                    <span>{String(event.event ?? event.type ?? "event")} · {String(event.timestamp ?? "-")}</span>
+                    <span>{formatRealtimeEvent(event)}</span>
                   </span>
                 ))}
               </div>
@@ -824,6 +922,14 @@ export function MeetingPage() {
                   </span>
                 ))}
                 {!realtimeTaskEvents.length && !taskOutputEvents(realtimeTask).length && <span className="small muted">等待实时任务事件。</span>}
+              </div>
+              <div className="meeting-output-list realtime-events">
+                {(agentEvents.length ? agentEvents : [{ type: "idle", timestamp: "-", text: "等待听悟 Agent 事件" }]).slice(0, 6).map((event, index) => (
+                  <span className="result-file" key={`agent-${String(event.type ?? event.event ?? "event")}-${index}`}>
+                    <CalendarCheck size={16} />
+                    <span>{formatAgentEvent(event)}</span>
+                  </span>
+                ))}
               </div>
             </Card>
 
@@ -965,11 +1071,224 @@ function CredentialLinks({ links }: { links?: Array<{ label: string; url: string
   );
 }
 
+function MeetingInsightPanel({
+  activeTab,
+  actionItems,
+  artifacts,
+  decisions,
+  diagnostics,
+  onOpenArtifact,
+  outputs,
+  preview,
+  previewBusy,
+  previewError,
+  resultSummary,
+  selectedArtifact,
+}: {
+  activeTab: MeetingInsightTab;
+  actionItems: string[];
+  artifacts: MeetingArtifact[];
+  decisions: string[];
+  diagnostics: RealtimeDiagnostics;
+  onOpenArtifact: (artifact: MeetingArtifact) => void;
+  outputs: string[];
+  preview: SharedPreviewResponse | null;
+  previewBusy: boolean;
+  previewError: string;
+  resultSummary: string;
+  selectedArtifact: MeetingArtifact | null;
+}) {
+  const tabArtifacts = artifactsForTab(artifacts, activeTab);
+  const outputPatterns = artifactPatternsForTab(activeTab);
+  if (activeTab === "minutes") {
+    return (
+      <div className="meeting-insight-panel">
+        <p>{resultSummary || "尚未生成会议纪要。"}</p>
+        <MeetingArtifactList artifacts={tabArtifacts} onOpen={onOpenArtifact} fallbackOutputs={[diagnostics.tingwuMinutesPath, diagnostics.openclawMinutesPath].filter(Boolean)} />
+        <MeetingArtifactPreview artifact={selectedArtifact} preview={preview} busy={previewBusy} error={previewError} />
+      </div>
+    );
+  }
+  if (activeTab === "actions") {
+    return (
+      <div className="meeting-insight-panel">
+        <div className="mini-table-wrap">
+          <table className="mini-table">
+            <tbody>
+              <tr><th>#</th><th>行动项</th><th>状态</th></tr>
+              {(actionItems.length ? actionItems : ["等待生成会后资料。"]).map((item, index) => (
+                <tr key={item}><td>{index + 1}</td><td>{item}</td><td>已生成</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <MeetingArtifactList artifacts={tabArtifacts} onOpen={onOpenArtifact} />
+        <MeetingArtifactPreview artifact={selectedArtifact} preview={preview} busy={previewBusy} error={previewError} />
+      </div>
+    );
+  }
+  if (activeTab === "decisions") {
+    return (
+      <div className="meeting-insight-panel">
+        <ol className="dense-list">
+          {(decisions.length ? decisions : ["等待生成纪要。"]).map((item) => <li key={item}>{item}</li>)}
+        </ol>
+        <MeetingArtifactList artifacts={tabArtifacts} onOpen={onOpenArtifact} />
+        <MeetingArtifactPreview artifact={selectedArtifact} preview={preview} busy={previewBusy} error={previewError} />
+      </div>
+    );
+  }
+  if (activeTab === "qa") {
+    return (
+      <div className="meeting-insight-panel">
+        <p>等待听悟问答回顾结果。</p>
+        <MeetingArtifactList artifacts={tabArtifacts} onOpen={onOpenArtifact} fallbackOutputs={outputMatches(outputs, outputPatterns)} />
+        <MeetingArtifactPreview artifact={selectedArtifact} preview={preview} busy={previewBusy} error={previewError} />
+      </div>
+    );
+  }
+  if (activeTab === "ppt") {
+    return (
+      <div className="meeting-insight-panel">
+        <p>{diagnostics.tingwuChainStatus === "completed" ? "已拉取可用输出文件。" : "等待 PPT 提取结果。"}</p>
+        <MeetingArtifactList artifacts={tabArtifacts} onOpen={onOpenArtifact} fallbackOutputs={outputMatches(outputs, outputPatterns)} />
+        <MeetingArtifactPreview artifact={selectedArtifact} preview={preview} busy={previewBusy} error={previewError} />
+      </div>
+    );
+  }
+  return (
+    <div className="meeting-insight-panel">
+      <p>等待思维导图结果。</p>
+      <MeetingArtifactList artifacts={tabArtifacts} onOpen={onOpenArtifact} fallbackOutputs={outputMatches(outputs, outputPatterns)} />
+      <MeetingArtifactPreview artifact={selectedArtifact} preview={preview} busy={previewBusy} error={previewError} />
+    </div>
+  );
+}
+
+function MeetingArtifactList({
+  artifacts,
+  fallbackOutputs = [],
+  onOpen,
+}: {
+  artifacts: MeetingArtifact[];
+  fallbackOutputs?: string[];
+  onOpen: (artifact: MeetingArtifact) => void;
+}) {
+  const fallbackArtifacts = fallbackOutputs.map((path) => meetingArtifactFromPath(path)).filter((item): item is MeetingArtifact => Boolean(item));
+  const items = uniqueArtifacts([...artifacts, ...fallbackArtifacts]);
+  return (
+    <div className="meeting-output-list meeting-artifact-list">
+      {items.map((artifact) => (
+        <button className="result-file meeting-artifact-button" key={`${artifact.kind}-${artifact.path}`} onClick={() => onOpen(artifact)} type="button">
+          <FileText size={16} />
+          <span>{artifact.label}</span>
+          <small>{artifact.stepLabel}</small>
+        </button>
+      ))}
+      {!items.length && <span className="small muted">暂无可展示产物。</span>}
+    </div>
+  );
+}
+
+function MeetingArtifactPreview({
+  artifact,
+  preview,
+  busy,
+  error,
+}: {
+  artifact: MeetingArtifact | null;
+  preview: SharedPreviewResponse | null;
+  busy: boolean;
+  error: string;
+}) {
+  if (!artifact && !busy && !error) return null;
+  return (
+    <div className="meeting-artifact-preview">
+      <WorkspaceFileViewer
+        source="workspace"
+        filePath={artifact?.workspaceName ?? ""}
+        preview={preview}
+        busy={busy}
+        error={error}
+        title="会议产物查看"
+        emptyText="选择左侧会议产物后在这里查看。"
+        compact
+      />
+    </div>
+  );
+}
+
+function MeetingOutputMatches({ outputs, patterns }: { outputs: string[]; patterns: string[] }) {
+  const matches = outputMatches(outputs, patterns);
+  return (
+    <div className="meeting-output-list">
+      {(matches.length ? matches : outputs.slice(0, 4)).map((item) => (
+        <span className="result-file" key={item}>
+          <FileText size={16} />
+          <span>{compactDisplayPath(item)}</span>
+        </span>
+      ))}
+      {!outputs.length && <span className="small muted">暂无输出文件。</span>}
+    </div>
+  );
+}
+
+function outputMatches(outputs: string[], patterns: string[]): string[] {
+  return outputs.filter((item) => patterns.some((pattern) => item.toLowerCase().includes(pattern)));
+}
+
+function TingwuCapabilityPanel({ providerStatus, compact = false }: { providerStatus: MeetingProviderStatus | null; compact?: boolean }) {
+  const capabilities = providerStatus?.providers.tongyi_tingwu.capabilities ?? {};
+  const items = [
+    ["实时转写", capabilities.realtime_transcription],
+    ["说话人分离", capabilities.speaker_diarization],
+    ["翻译", capabilities.translation],
+    ["热词库", capabilities.phrase_hot_words],
+    ["关键词/关键句", capabilities.key_information],
+    ["行动项", capabilities.actions],
+    ["全文摘要", capabilities.full_summary],
+    ["发言总结", capabilities.conversational_summary],
+    ["问答回顾", capabilities.questions_answering],
+    ["章节速览", capabilities.auto_chapters],
+    ["思维导图", capabilities.mind_map],
+    ["PPT 提取", capabilities.ppt_extraction],
+    ["口语书面化", capabilities.text_polish],
+    ["自定义 Prompt", capabilities.custom_prompt],
+    ["会议 Agent", capabilities.meeting_agent_events],
+  ];
+  return (
+    <div className={`tingwu-capability-grid ${compact ? "tingwu-capability-grid--compact" : ""}`} aria-label="Tingwu enabled capabilities">
+      {items.map(([label, enabled]) => (
+        <span key={String(label)} className={`tingwu-capability ${enabled ? "tingwu-capability--on" : "tingwu-capability--off"}`}>
+          {String(label)}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 type RealtimeDiagnostics = ReturnType<typeof realtimeDiagnostics>;
 
+interface MeetingArtifact {
+  path: string;
+  workspaceName: string;
+  label: string;
+  step: string;
+  stepLabel: string;
+  kind: MeetingInsightTab | "transcript" | "audio" | "email" | "projection" | "other";
+  type: string;
+}
+
 function isTranscriptLike(file: SharedFile) {
-  const text = `${file.name} ${file.mime_type ?? ""}`.toLowerCase();
-  return text.includes("transcript") || text.includes("meeting") || text.endsWith(".txt") || text.endsWith(".md");
+  return isTranscriptPathLike(file.relative_path || file.name);
+}
+
+function isTranscriptPathLike(value?: string) {
+  const text = String(value ?? "").replace(/\\/g, "/").toLowerCase();
+  const suffix = text.includes(".") ? text.slice(text.lastIndexOf(".")) : "";
+  if (![".txt", ".md", ".markdown", ".json"].includes(suffix)) return false;
+  if (suffix === ".json") return /transcript|meeting|minutes|asr|tingwu|转写|会议|纪要/.test(text);
+  return /transcript|meeting|minutes|asr|tingwu|转写|会议|纪要|speaker|发言/.test(text);
 }
 
 function compactFileLabel(name: string) {
@@ -1010,13 +1329,14 @@ function friendlyStatus(status: unknown) {
     enabled: "已开启",
     available: "可用",
     completed: "已完成",
+    partial: "部分完成",
     starting: "启动中",
     running: "进行中",
     stopping: "停止中",
     stopped: "已停止",
     pending: "待处理",
-    waiting_confirmation: "待确认",
-    needs_confirmation: "待确认",
+    waiting_confirmation: "处理中",
+    needs_confirmation: "需授权",
     warning: "需注意",
     blocked: "已阻止",
     failed: "失败",
@@ -1135,6 +1455,157 @@ function meetingJobResult(job: MeetingJob | null): Record<string, unknown> | nul
   };
 }
 
+function meetingArtifacts(
+  value: Record<string, unknown> | null,
+  job: MeetingJob | null,
+  realtime: MeetingRealtimeStatus | null,
+): MeetingArtifact[] {
+  const artifacts: MeetingArtifact[] = [];
+  const add = (path: unknown, step = "", label = "") => {
+    if (typeof path !== "string" || !path.trim()) return;
+    const artifact = meetingArtifactFromPath(path, step, label);
+    if (artifact) artifacts.push(artifact);
+  };
+
+  outputPaths(value).forEach((path) => add(path));
+  outputPaths(recordValue(realtime)).forEach((path) => add(path));
+  if (Array.isArray(realtime?.outputs)) {
+    realtime.outputs.forEach((item) => add(item.path, String(item.type ?? ""), String(item.type ?? "")));
+  }
+  job?.steps.forEach((step) => {
+    add(step.output_path, step.name);
+    outputPaths(recordValue(step.output)).forEach((path) => add(path, step.name));
+    const outputs = recordValue(step.output)?.outputs;
+    if (Array.isArray(outputs)) {
+      outputs.forEach((item) => {
+        const record = recordValue(item);
+        add(record?.path, step.name, String(record?.type ?? ""));
+      });
+    }
+  });
+  return uniqueArtifacts(artifacts);
+}
+
+function meetingArtifactFromPath(pathValue: string, step = "", label = ""): MeetingArtifact | null {
+  const path = pathValue.trim();
+  if (!path || path.startsWith("http://") || path.startsWith("https://")) return null;
+  const workspaceName = normalizeWorkspaceArtifactPath(path);
+  const basename = path.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? path;
+  const type = artifactType(path);
+  const kind = artifactKind(path, step);
+  const friendlyLabel = label || friendlyArtifactLabel(path, step, kind, type);
+  return {
+    path,
+    workspaceName,
+    label: `${friendlyLabel} · ${basename}`,
+    step,
+    stepLabel: artifactStepLabel(step, kind, type),
+    kind,
+    type,
+  };
+}
+
+function friendlyArtifactLabel(pathValue: string, step: string, kind: MeetingArtifact["kind"], type: string) {
+  const text = `${pathValue} ${step} ${kind} ${type}`.toLowerCase();
+  if (text.includes("minutes") || text.includes("纪要")) return "会议纪要";
+  if (text.includes("decision") || text.includes("决策") || text.includes("决定")) return "决策";
+  if (text.includes("action") || text.includes("todo") || text.includes("followup") || text.includes("待办")) return "待办";
+  if (text.includes("email") || text.includes("mail")) return "邮件草稿";
+  if (text.includes("ppt") || text.includes("slide")) return "PPT";
+  if (text.includes("mindmap")) return "思维导图";
+  if (text.includes("transcript") || text.includes("转写")) return "转写";
+  return "结果文件";
+}
+
+function uniqueArtifacts(items: MeetingArtifact[]): MeetingArtifact[] {
+  const seen = new Set<string>();
+  const result: MeetingArtifact[] = [];
+  items.forEach((item) => {
+    const key = item.workspaceName || item.path;
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    result.push(item);
+  });
+  return result.slice(0, 40);
+}
+
+function artifactsForTab(artifacts: MeetingArtifact[], tab: MeetingInsightTab): MeetingArtifact[] {
+  const direct = artifacts.filter((artifact) => artifact.kind === tab);
+  if (direct.length) return direct;
+  const patterns = artifactPatternsForTab(tab);
+  return artifacts.filter((artifact) => patterns.some((pattern) => `${artifact.path} ${artifact.step} ${artifact.label}`.toLowerCase().includes(pattern)));
+}
+
+function artifactPatternsForTab(tab: MeetingInsightTab): string[] {
+  if (tab === "minutes") return ["minutes", "summary", "纪要"];
+  if (tab === "actions") return ["action", "todo", "reminder", "followup", "行动", "待办", "提醒"];
+  if (tab === "decisions") return ["decision", "decisions", "决策", "决定"];
+  if (tab === "qa") return ["qa", "question", "answer", "questions", "问答"];
+  if (tab === "ppt") return ["ppt", "slide", "presentation"];
+  return ["mind", "map", "mindmap", "思维导图"];
+}
+
+function artifactKind(pathValue: string, step: string): MeetingArtifact["kind"] {
+  const text = `${pathValue} ${step}`.toLowerCase();
+  if (step === "minutes" || text.includes("minutes") || text.includes("summary") || text.includes("纪要")) return "minutes";
+  if (step === "action_items" || step === "reminders" || text.includes("action") || text.includes("todo") || text.includes("reminder") || text.includes("待办")) return "actions";
+  if (step === "decisions" || text.includes("decision") || text.includes("决策")) return "decisions";
+  if (text.includes("question") || text.includes("answer") || text.includes("qa")) return "qa";
+  if (text.includes("ppt") || text.includes("slide") || text.includes("presentation")) return "ppt";
+  if (text.includes("mind") || text.includes("mindmap") || text.includes("思维导图")) return "mindmap";
+  if (text.includes("transcript")) return "transcript";
+  if (text.match(/\.(wav|mp3|m4a|pcm)$/)) return "audio";
+  if (text.includes("email") || text.includes("mail")) return "email";
+  if (step === "projection_confirmation" || text.includes("projection")) return "projection";
+  return "other";
+}
+
+function artifactStepLabel(step: string, kind: MeetingArtifact["kind"], type: string): string {
+  const byStep: Record<string, string> = {
+    realtime_capture: "实时采集",
+    import_transcript: "转写",
+    minutes: "纪要",
+    decisions: "决策",
+    action_items: "待办",
+    followup: "会后资料",
+    reminders: "提醒",
+    projection_confirmation: "投影",
+  };
+  if (step && byStep[step]) return byStep[step];
+  const byKind: Record<string, string> = {
+    minutes: "纪要",
+    actions: "待办",
+    decisions: "决策",
+    qa: "问答",
+    ppt: "PPT",
+    mindmap: "思维导图",
+    transcript: "转写",
+    audio: "录音",
+    email: "邮件",
+    projection: "投影",
+    other: type || "文件",
+  };
+  return byKind[kind] ?? type;
+}
+
+function artifactType(pathValue: string): string {
+  const name = pathValue.split("?")[0].split("#")[0];
+  const dot = name.lastIndexOf(".");
+  return dot >= 0 ? name.slice(dot + 1).toLowerCase() : "file";
+}
+
+function normalizeWorkspaceArtifactPath(pathValue: string): string {
+  const normalized = pathValue.trim().replace(/\\/g, "/");
+  const workspaceMarker = "/workspace/";
+  const workspaceIndex = normalized.lastIndexOf(workspaceMarker);
+  if (workspaceIndex >= 0) return normalized.slice(workspaceIndex + workspaceMarker.length);
+  const relativeMarker = "lelamp_runtime/workspace/";
+  const relativeIndex = normalized.lastIndexOf(relativeMarker);
+  if (relativeIndex >= 0) return normalized.slice(relativeIndex + relativeMarker.length);
+  if (normalized.startsWith("workspace/")) return normalized.slice("workspace/".length);
+  return normalized.replace(/^\.\//, "");
+}
+
 function toWorkflowSteps(job: MeetingJob | null): MeetingStep[] {
   if (!job) {
     return meetingStepMeta.map((step, index) => ({
@@ -1159,7 +1630,7 @@ function toWorkflowSteps(job: MeetingJob | null): MeetingStep[] {
       input: apiStep?.input_file || job.transcript || "-",
       understanding: apiStep?.system_understanding || "等待步骤执行",
       result: apiStep?.ai_result || "未执行",
-      confirmation: apiStep?.confirmation?.required ? "需要用户确认" : apiStep ? "无需确认" : "等待执行",
+      confirmation: apiStep ? "直接生成" : "等待执行",
       outputPath: apiStep?.output_path || "-",
       taskId: apiStep?.task_id,
     };
@@ -1246,6 +1717,57 @@ function taskOutputEvents(task: TaskRecord | null): Array<Record<string, unknown
   return Array.isArray(events) ? events.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item)) : [];
 }
 
+function tingwuAgentEvents(value: Record<string, unknown> | null, realtime: MeetingRealtimeStatus | null): Array<Record<string, unknown>> {
+  const session = nestedRecord(value, "session");
+  const taskPayload =
+    recordValue(realtime?.task_payload)
+    ?? recordValue(session?.task_payload)
+    ?? recordValue(value?.task_payload);
+  const agentEvents = taskPayload?.agent_events;
+  if (!Array.isArray(agentEvents)) return [];
+  return agentEvents.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item)).slice(-12).reverse();
+}
+
+function formatRealtimeEvent(event: Record<string, unknown>): string {
+  const name = String(event.event ?? event.type ?? "event");
+  const speaker = String(event.speaker ?? "");
+  const text = compactText(event.text);
+  const timestamp = String(event.timestamp ?? "-");
+  return [name, speaker && speaker !== "Unknown" ? speaker : "", text, timestamp].filter(Boolean).join(" · ");
+}
+
+function formatAgentEvent(event: Record<string, unknown>): string {
+  const type = String(event.type ?? event.event ?? "agent");
+  const agentId = String(event.agent_id ?? "");
+  const dataId = String(event.data_id ?? "");
+  const text = compactText(event.text);
+  return [type, agentId, dataId ? `dataId ${dataId}` : "", text].filter(Boolean).join(" · ");
+}
+
+function compactText(value: unknown, maxLength = 80): string {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+}
+
+function cleanSpeakerCounts(value?: Record<string, number> | null): Record<string, number> {
+  const cleaned: Record<string, number> = {};
+  Object.entries(value ?? {}).forEach(([speaker, count]) => {
+    const safeSpeaker = safeSpeakerLabel(speaker);
+    if (!safeSpeaker) return;
+    cleaned[safeSpeaker] = (cleaned[safeSpeaker] ?? 0) + Number(count ?? 0);
+  });
+  return cleaned;
+}
+
+function safeSpeakerLabel(value: unknown): string {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  if (!text || text.length > 40 || text.includes("�") || text.includes("PK\u0003\u0004")) return "";
+  if (/[\u0000-\u001f\u007f]/.test(text)) return "";
+  if (!/^[\w .#:\-\u4e00-\u9fff]+$/u.test(text)) return "";
+  return text || "Unknown";
+}
+
 function taskMonitorValue(task: TaskRecord | null, key: "websocket_audio_frames" | "audio_seconds" | "final_count" | "last_status_poll"): unknown {
   const output = recordValue(task?.output);
   const monitor = recordValue(output?.monitor);
@@ -1270,7 +1792,7 @@ function acceptanceChecklistWithRuntimeStatus(
   const transcriptSaved = Boolean(realtime?.transcript_path || diagnostics.transcriptPath || stepStatus("realtime_capture") === "completed");
   const stopped = ["stopped", "completed", "failed"].includes(realtimeStatus) || stepStatus("realtime_capture") === "completed";
   const minutesFetched = Boolean(diagnostics.tingwuMinutesPath || diagnostics.tingwuMinutesDataId || stepStatus("minutes") === "completed");
-  const followupDone = ["completed", "waiting_confirmation"].includes(stepStatus("decisions"))
+  const followupDone = stepStatus("decisions") === "completed"
     && stepStatus("action_items") === "completed"
     && stepStatus("followup") === "completed"
     && stepStatus("reminders") === "completed"

@@ -7,6 +7,7 @@ import type {
   AssistantPiVoiceResponse,
   AssistantProviderStatus,
   CameraStreamStatus,
+  LeLampVoiceCommandResponse,
   VoiceCaptureResponse,
   VoiceConversationResponse,
   VoiceStatus,
@@ -143,6 +144,14 @@ export async function postVoiceCaptureOnce(options: { seconds?: number; authoriz
       speak: options.speak ?? false,
       page: "voice",
     }),
+  });
+  return { data, source: "api" };
+}
+
+export async function sendLeLampVoiceCommand(text: string): Promise<ApiResult<LeLampVoiceCommandResponse>> {
+  const data = await request<LeLampVoiceCommandResponse>("/api/lelamp/voice-command", {
+    method: "POST",
+    body: JSON.stringify({ text }),
   });
   return { data, source: "api" };
 }

@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .audit import AuditLogger
+from .lelamp_voice_skill import parse_lamp_voice_command
+from .meeting_voice_skill import parse_meeting_voice_command
 
 
 @dataclass(frozen=True)
@@ -36,6 +38,26 @@ class TaskPlanner:
         normalized = request.lower()
         steps: list[PlanStep] = []
 
+        if parse_meeting_voice_command(request) is not None:
+            steps.append(
+                PlanStep(
+                    skill="meeting_voice_control",
+                    action="parse deterministic meeting command and execute local meeting/Tingwu control",
+                    inputs=("voice transcript", "meeting_voice_commands.json", "active meeting or Tingwu realtime session"),
+                    outputs=("parsed command", "meeting status", "workspace outputs", "spoken confirmation"),
+                    fallback="return provider unavailable or no active meeting instead of calling an LLM for control",
+                )
+            )
+        if parse_lamp_voice_command(request) is not None:
+            steps.append(
+                PlanStep(
+                    skill="lelamp_voice_control",
+                    action="parse deterministic lamp command and execute local hardware/follow control",
+                    inputs=("voice transcript", "LELAMP_PORT", "LELAMP_ID", "OPENCLAW_ENABLE_HARDWARE"),
+                    outputs=("parsed command", "hardware status", "spoken confirmation"),
+                    fallback="return needs_hardware or hardware_unavailable without moving servos blindly",
+                )
+            )
         if any(marker in normalized for marker in ["meeting", "会议", "纪要"]):
             steps.extend(
                 [

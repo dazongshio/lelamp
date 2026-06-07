@@ -21,9 +21,9 @@ class DashScopeRealtimeError(RuntimeError):
 @dataclass(frozen=True)
 class DashScopeRealtimeConfig:
     api_key: str
-    model: str = "qwen3-omni-flash-realtime"
+    model: str = "qwen3.5-omni-plus-realtime"
     url: str = "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
-    voice: str = "Cherry"
+    voice: str = "Tina"
     instructions: str = "你是 LeLamp 桌面数字人助手。请用简体中文回答，保持简短、自然、适合朗读。"
     input_audio_format: str = "pcm"
     output_audio_format: str = "pcm"
@@ -33,6 +33,8 @@ class DashScopeRealtimeConfig:
     vad_threshold: float = 0.5
     silence_duration_ms: int = 600
     transcription_model: str = "gummy-realtime-v1"
+    enable_search: bool = False
+    enable_search_sources: bool = True
 
 
 class DashScopeRealtimeClient:
@@ -172,25 +174,30 @@ class DashScopeRealtimeClient:
         raise DashScopeRealtimeError("Qwen-Omni realtime text response timed out or returned no text.")
 
     def update_session(self) -> None:
+        session: dict[str, Any] = {
+            "modalities": ["text", "audio"],
+            "instructions": self.config.instructions,
+            "voice": self.config.voice,
+            "input_audio_format": self.config.input_audio_format,
+            "output_audio_format": self.config.output_audio_format,
+            "input_audio_transcription": {
+                "model": self.config.transcription_model,
+            },
+            "turn_detection": {
+                "type": self.config.turn_detection_type,
+                "threshold": self.config.vad_threshold,
+                "silence_duration_ms": self.config.silence_duration_ms,
+            },
+        }
+        if self.config.enable_search:
+            session["enable_search"] = True
+            if self.config.enable_search_sources:
+                session["search_options"] = {"enable_source": True}
         self.send(
             {
                 "type": "session.update",
-                "session": {
-                    "modalities": ["text", "audio"],
-                    "instructions": self.config.instructions,
-                    "voice": self.config.voice,
-                    "input_audio_format": self.config.input_audio_format,
-                    "output_audio_format": self.config.output_audio_format,
-                    "input_audio_transcription": {
-                        "model": self.config.transcription_model,
-                    },
-                    "turn_detection": {
-                        "type": self.config.turn_detection_type,
-                        "threshold": self.config.vad_threshold,
-                        "silence_duration_ms": self.config.silence_duration_ms,
-                    },
-                },
-            }
+                "session": session,
+            },
         )
 
     def send(self, payload: dict[str, Any]) -> None:

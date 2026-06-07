@@ -17,6 +17,7 @@ from lelamp.office_agent.assistant_feedback import AssistantFeedback
 from lelamp.office_agent.hardware import LampHardware
 from lelamp.office_agent.latency import LatencyProbe
 from lelamp.office_agent.llm import LLMError, ResponsesLLM, ResponsesLLMConfig
+from lelamp.office_agent.meeting_voice_skill import execute_runtime_meeting_voice_command
 from lelamp.office_agent.prompts import OFFICE_AGENT_INSTRUCTIONS
 from lelamp.office_agent.runtime import build_runtime
 from openclaw_voice import (
@@ -243,7 +244,9 @@ def main() -> None:
         port=runtime.config.hardware_port,
         lamp_id=runtime.config.lamp_id,
         audit=runtime.audit,
+        rgb_enabled=runtime.config.enable_rgb,
     ) as hardware:
+        runtime.lelamp_voice.set_hardware(hardware)
         feedback = AssistantFeedback(
             hardware=hardware,
             audit=runtime.audit,
@@ -380,6 +383,57 @@ def main() -> None:
                         speak(runtime, audio_api, dashscope_tts, reusable_dashscope_tts, elevenlabs_tts, reply, work_dir / f"reply_{index:06d}.wav", speaker_device, args.no_tts)
                 active_turns_remaining = 0
                 set_state(runtime, "idle", feedback=feedback)
+                latency.print_summary()
+                continue
+
+            with latency.stage("meeting_voice"):
+                meeting_result = runtime.meeting_voice.handle_text(
+                    transcript,
+                    executor=lambda command, raw_text: execute_runtime_meeting_voice_command(runtime, command, raw_text),
+                )
+            if meeting_result.get("handled"):
+                reply = str(meeting_result.get("reply") or "已执行会议命令。")
+                print(f"OpenClaw: {reply}")
+                history.extend([{"role": "user", "text": transcript}, {"role": "assistant", "text": reply}])
+                history = history[-args.max_history_turns * 2 :]
+                set_state(runtime, "success" if meeting_result.get("status") in {"completed", "running", "already_running", "not_running"} else "blocked", {"meeting_voice": meeting_result}, feedback)
+                if args.async_tts:
+                    speech_queue.submit(reply, work_dir / f"reply_{index:06d}.wav")
+                    latency.add("tts_queued", 0.0)
+                else:
+                    with latency.stage("tts_play"):
+                        speak(runtime, audio_api, dashscope_tts, reusable_dashscope_tts, elevenlabs_tts, reply, work_dir / f"reply_{index:06d}.wav", speaker_device, args.no_tts)
+                active_turns_remaining = max(active_turns_remaining - 1, 0)
+                set_state(
+                    runtime,
+                    "follow_up" if active_turns_remaining else "idle",
+                    {"remaining": active_turns_remaining},
+                    feedback,
+                )
+                latency.print_summary()
+                continue
+
+            with latency.stage("lamp_voice"):
+                lamp_result = runtime.lelamp_voice.handle_text(transcript)
+            if lamp_result.get("handled"):
+                reply = str(lamp_result.get("reply") or "已执行台灯命令。")
+                print(f"OpenClaw: {reply}")
+                history.extend([{"role": "user", "text": transcript}, {"role": "assistant", "text": reply}])
+                history = history[-args.max_history_turns * 2 :]
+                set_state(runtime, "success" if lamp_result.get("status") in {"executed", "started", "stopped", "reported", "already_running", "not_running"} else "blocked", {"lamp_voice": lamp_result}, feedback)
+                if args.async_tts:
+                    speech_queue.submit(reply, work_dir / f"reply_{index:06d}.wav")
+                    latency.add("tts_queued", 0.0)
+                else:
+                    with latency.stage("tts_play"):
+                        speak(runtime, audio_api, dashscope_tts, reusable_dashscope_tts, elevenlabs_tts, reply, work_dir / f"reply_{index:06d}.wav", speaker_device, args.no_tts)
+                active_turns_remaining = max(active_turns_remaining - 1, 0)
+                set_state(
+                    runtime,
+                    "follow_up" if active_turns_remaining else "idle",
+                    {"remaining": active_turns_remaining},
+                    feedback,
+                )
                 latency.print_summary()
                 continue
 

@@ -6,7 +6,7 @@ import { getAssistantNotifications, getAssistantProvidersStatus, postAssistantMe
 import { getTask } from "../api/tasks";
 import type { AssistantManualResponse, AssistantMessage, AssistantNotification, AssistantProviderStatus, TaskRecord } from "../api/types";
 import { useCameraStream } from "../hooks/useCameraStream";
-import { buildForegroundReply } from "../utils/foregroundReply";
+import { buildForegroundReply, isLocalControlText } from "../utils/foregroundReply";
 import { createId } from "../utils/id";
 import { ChatBubble } from "./ChatBubble";
 import { StatusBadge } from "./StatusBadge";
@@ -18,6 +18,12 @@ interface AssistantPanelProps {
   collapsed?: boolean;
   onCollapsedChange?: (collapsed: boolean) => void;
   placeholder?: string;
+}
+
+function directReplyAttachment(kind: string): string {
+  if (kind === "lamp_control") return "本地台灯控制 · 未调用 Qwen";
+  if (kind === "meeting_control") return "本地会议控制 · 未调用 Qwen";
+  return "直接回复 · 未触发本地任务";
 }
 
 export function AssistantPanel({
@@ -68,17 +74,20 @@ export function AssistantPanel({
     const userMessage: AssistantMessage = { id: createId("assistant-user"), role: "user", text, time: now };
     setMessages((items) => [...items, userMessage]);
     const foreground = buildForegroundReply(text, window.location.pathname.replace("/", "") || "dashboard");
-    setMessages((items) => [
-      ...items,
-      {
-        id: createId("assistant-foreground"),
-        role: "assistant",
-        text: foreground.text,
-        time: new Date().toTimeString().slice(0, 5),
-        status: "running",
-        attachment: foreground.attachment || undefined,
-      },
-    ]);
+    const localControl = isLocalControlText(text);
+    if (!localControl) {
+      setMessages((items) => [
+        ...items,
+        {
+          id: createId("assistant-foreground"),
+          role: "assistant",
+          text: foreground.text,
+          time: new Date().toTimeString().slice(0, 5),
+          status: "running",
+          attachment: foreground.attachment || undefined,
+        },
+      ]);
+    }
     setInput("");
     setSending(true);
     try {
@@ -89,7 +98,7 @@ export function AssistantPanel({
         foreground_mode: foreground.mode,
       }, { sessionId, page: window.location.pathname.replace("/", "") || "dashboard", speak: true });
       setSessionId(result.data.session_id);
-      if (result.data.route.kind === "chat" && result.data.assistant_message) {
+      if (result.data.assistant_message) {
         setMessages((items) => [
           ...items,
           {
@@ -98,7 +107,7 @@ export function AssistantPanel({
             text: result.data.assistant_message?.text ?? "",
             time: new Date().toTimeString().slice(0, 5),
             status: result.data.assistant_message?.provider_status ?? "completed",
-            attachment: "直接回复 · 未触发本地任务",
+            attachment: directReplyAttachment(result.data.route.kind),
           },
         ]);
         return;

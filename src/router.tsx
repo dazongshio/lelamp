@@ -5,6 +5,7 @@ import { SharedSpacePage } from "./pages/SharedSpacePage";
 import { AssistantPage } from "./pages/AssistantPage";
 import { MeetingPage } from "./pages/MeetingPage";
 import { DocumentsPage } from "./pages/DocumentsPage";
+import { WikiPage } from "./pages/WikiPage";
 import { ProjectionPage } from "./pages/ProjectionPage";
 import { ProductChecklistPage } from "./pages/ProductChecklistPage";
 import { ValidationPage } from "./pages/ValidationPage";
@@ -14,6 +15,7 @@ import { MobileBridgePage } from "./pages/MobileBridgePage";
 import { SmartHomePage } from "./pages/SmartHomePage";
 import { VoicePage } from "./pages/VoicePage";
 import { HardwarePage } from "./pages/HardwarePage";
+import { MotorControlPage } from "./pages/MotorControlPage";
 import { AuditPage } from "./pages/AuditPage";
 import { SettingsPage } from "./pages/SettingsPage";
 
@@ -28,6 +30,7 @@ export const router = createBrowserRouter([
       { path: "assistant", element: <AssistantPage /> },
       { path: "meeting", element: <MeetingPage /> },
       { path: "documents", element: <DocumentsPage /> },
+      { path: "wiki", element: <WikiPage /> },
       { path: "projection", element: <ProjectionPage /> },
       { path: "checklist", element: <ProductChecklistPage /> },
       { path: "validation", element: <ValidationPage /> },
@@ -36,6 +39,7 @@ export const router = createBrowserRouter([
       { path: "mobile", element: <MobileBridgePage /> },
       { path: "smart-home", element: <SmartHomePage /> },
       { path: "voice", element: <VoicePage /> },
+      { path: "motors", element: <MotorControlPage /> },
       { path: "hardware", element: <HardwarePage /> },
       { path: "audit", element: <AuditPage /> },
       { path: "settings", element: <SettingsPage /> },

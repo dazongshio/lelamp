@@ -1,0 +1,181 @@
+{
+  "version": 1,
+  "negation": {
+    "markers": ["不要", "别", "先不", "不用", "不要执行"],
+    "allowed_markers": ["停止跟随", "停止扫描", "别跟", "不要跟", "不跟"]
+  },
+  "commands": [
+    {
+      "action": "project",
+      "label": "project",
+      "reply": "已到达投影位置并开始投影。",
+      "markers": ["开始投影", "启动投影", "投影", "打开投影", "进入投影", "切到投影", "到投影位置", "移动到投影位置", "舵机到达投影位置", "投影位置"]
+    },
+    {
+      "action": "scan_pdf",
+      "label": "scan_pdf",
+      "reply": "已开始灯头扫描并生成 PDF。",
+      "recording": "scanning",
+      "markers": ["扫描成pdf", "扫描pdf", "拍照扫描", "灯头扫描", "扫描文件", "扫描文档", "生成pdf", "拍成pdf"]
+    },
+    {
+      "action": "scan_pose",
+      "label": "scan_pose",
+      "reply": "已到达扫描位置。",
+      "recording": "scanning",
+      "markers": ["回到扫描位置", "调整到扫描位置", "到达扫描位置", "扫描位置", "扫描姿态"]
+    },
+    {
+      "action": "default_state",
+      "label": "power_on_default",
+      "reply": "已加电并回到默认状态。",
+      "recording": "idle",
+      "markers": ["加电", "上电", "电机加电", "舵机加电"]
+    },
+    {
+      "action": "relax_motors",
+      "label": "relax_motors",
+      "reply": "已松开电机。",
+      "markers": ["掉电", "断电", "松开电机", "松开舵机", "释放电机", "释放舵机", "电机掉电", "舵机掉电"]
+    },
+    {
+      "action": "default_state",
+      "label": "default_state",
+      "reply": "已回到默认状态。",
+      "recording": "idle",
+      "markers": ["回到默认位置", "默认位置", "回到默认状态", "恢复默认状态", "回默认状态", "回到默认", "恢复默认", "默认姿态", "默认状态", "回到初始状态", "恢复初始状态", "台灯复位", "复位台灯", "重置台灯", "待机", "回待机", "安静"]
+    },
+    {
+      "action": "stop_follow",
+      "label": "stop_follow",
+      "reply": "已停止跟随。",
+      "markers": ["停止跟随", "停止追踪", "停止扫描", "别跟", "不要跟", "不跟了", "停下跟随", "取消跟随"]
+    },
+    {
+      "action": "status",
+      "label": "status",
+      "reply": "我检查一下台灯状态。",
+      "markers": ["台灯状态", "灯状态", "控制状态", "跟随状态"]
+    },
+    {
+      "action": "start_follow",
+      "label": "start_follow",
+      "reply": "已启动人物跟随。",
+      "markers": ["跟随我", "跟着我", "开始跟随", "启动跟随", "追踪人", "跟踪人", "追踪人物", "跟踪人物", "人物居中", "把人居中", "灯头对齐人", "对齐人类", "对准人类"]
+    },
+    {
+      "action": "set_rgb",
+      "label": "light_off",
+      "reply": "已关灯。",
+      "rgb": [0, 0, 0],
+      "markers": ["关灯", "关闭灯", "关闭台灯", "熄灯", "灯关掉", "把灯关了"]
+    },
+    {
+      "action": "set_rgb",
+      "label": "light_on",
+      "reply": "已开灯。",
+      "rgb": [255, 230, 180],
+      "markers": ["开灯", "打开灯", "打开台灯", "亮灯", "灯打开", "把灯打开"]
+    }
+  ],
+  "colors": [
+    {
+      "label": "warm_white",
+      "reply": "已切到暖光。",
+      "rgb": [255, 214, 160],
+      "markers": ["暖光", "暖白", "柔和", "阅读灯"]
+    },
+    {
+      "label": "white",
+      "reply": "已切到白光。",
+      "rgb": [255, 255, 255],
+      "markers": ["白光", "白色", "冷白"]
+    },
+    {
+      "label": "red",
+      "reply": "已切到红色。",
+      "rgb": [255, 32, 24],
+      "markers": ["红色", "红灯"]
+    },
+    {
+      "label": "green",
+      "reply": "已切到绿色。",
+      "rgb": [42, 210, 92],
+      "markers": ["绿色", "绿灯"]
+    },
+    {
+      "label": "blue",
+      "reply": "已切到蓝色。",
+      "rgb": [36, 126, 255],
+      "markers": ["蓝色", "蓝灯"]
+    },
+    {
+      "label": "yellow",
+      "reply": "已切到黄色。",
+      "rgb": [255, 210, 48],
+      "markers": ["黄色", "黄灯"]
+    },
+    {
+      "label": "purple",
+      "reply": "已切到紫色。",
+      "rgb": [130, 82, 255],
+      "markers": ["紫色", "紫灯"]
+    }
+  ],
+  "recordings": [
+    {
+      "label": "nod",
+      "recording": "nod",
+      "reply": "已点头。",
+      "markers": ["点头", "点一下头", "点点头"]
+    },
+    {
+      "label": "headshake",
+      "recording": "headshake",
+      "reply": "已摇头。",
+      "markers": ["摇头", "摇一下头", "摇摇头"]
+    },
+    {
+      "label": "happy",
+      "recording": "happy_wiggle",
+      "reply": "已切到开心动作。",
+      "markers": ["开心", "高兴", "快乐"]
+    },
+    {
+      "label": "shy",
+      "recording": "shy",
+      "reply": "已切到害羞动作。",
+      "markers": ["害羞", "害羞一下"]
+    },
+    {
+      "label": "shock",
+      "recording": "shock",
+      "reply": "已切到惊讶动作。",
+      "markers": ["惊讶", "震惊", "吓一跳"]
+    },
+    {
+      "label": "sad",
+      "recording": "sad",
+      "reply": "已切到伤心动作。",
+      "markers": ["伤心", "难过"]
+    },
+    {
+      "label": "curious",
+      "recording": "curious",
+      "reply": "已切到好奇动作。",
+      "markers": ["好奇", "疑惑"]
+    },
+    {
+      "label": "wake_up",
+      "recording": "wake_up",
+      "reply": "已唤醒。",
+      "markers": ["醒来", "抬头", "唤醒"]
+    },
+    {
+      "label": "idle",
+      "recording": "idle",
+      "reply": "已回到待机。",
+      "markers": ["待机", "回待机", "安静"]
+    }
+  ]
+}

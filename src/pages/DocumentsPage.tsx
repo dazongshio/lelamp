@@ -1,7 +1,7 @@
-import { AlertTriangle, Camera, FileImage, FileText, ListTree, Mail, ScanLine, Table2 } from "lucide-react";
+import { AlertTriangle, BookOpen, Camera, ExternalLink, FileImage, FileText, ListTree, ScanLine, Table2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { apiErrorMessage } from "../api/client";
+import { apiErrorMessage, readToken } from "../api/client";
 import {
   checkScanCaptureReadiness,
   captureDocumentScan,
@@ -12,14 +12,17 @@ import {
   runDocumentReportOutline,
   runDocumentRisks,
   runDocumentTableExtract,
+  runScanEnhance,
   runScanProcess,
 } from "../api/documents";
 import { getSecurity } from "../api/security";
-import { getSharedFiles, getSharedPreview } from "../api/shared";
-import type { DocumentAdapter, DocumentResult, ScanResult, SecurityStatus, SharedFile, SharedPreviewResponse } from "../api/types";
+import { getSharedFiles, getSharedPreview, getWorkspaceFiles, getWorkspacePreview } from "../api/shared";
+import { syncWorkspaceFileToWiki } from "../api/wiki";
+import type { DocumentAdapter, DocumentResult, DocmostSyncResponse, ScanResult, SecurityStatus, SharedFile, SharedPreviewResponse } from "../api/types";
 import { Card } from "../components/Card";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
+import { WorkspaceFileViewer } from "../components/WorkspaceFileViewer";
 import { mockSecurity } from "../data/mockSecurity";
 import "./pages.css";
 
@@ -29,6 +32,12 @@ export function DocumentsPage() {
   const [files, setFiles] = useState<SharedFile[]>([]);
   const [selected, setSelected] = useState("");
   const [preview, setPreview] = useState<SharedPreviewResponse | null>(null);
+  const [artifactPath, setArtifactPath] = useState("");
+  const [artifactPreview, setArtifactPreview] = useState<SharedPreviewResponse | null>(null);
+  const [artifactPreviewError, setArtifactPreviewError] = useState("");
+  const [artifactPreviewBusy, setArtifactPreviewBusy] = useState(false);
+  const [wikiBusyPath, setWikiBusyPath] = useState("");
+  const [wikiResult, setWikiResult] = useState<DocmostSyncResponse | null>(null);
   const [result, setResult] = useState<DocumentResult | null>(null);
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [captureReadiness, setCaptureReadiness] = useState<Record<string, unknown> | null>(null);
@@ -49,8 +58,9 @@ export function DocumentsPage() {
   const load = useCallback(async () => {
     setError("");
     try {
+      const listFiles = source === "workspace" ? getWorkspaceFiles : getSharedFiles;
       const [filesResult, adaptersResult, securityResult] = await Promise.all([
-        getSharedFiles({ page_size: 100 }),
+        listFiles({ page_size: source === "workspace" ? 300 : 100 }),
         getDocumentAdaptersStatus(),
         getSecurity(),
       ]);
@@ -58,11 +68,11 @@ export function DocumentsPage() {
       setFiles(nextFiles);
       setAdapters(adaptersResult.data.adapters);
       setSecurity(securityResult.data);
-      setSelected((current) => current || nextFiles[0]?.relative_path || "");
+      setSelected((current) => nextFiles.some((file) => file.relative_path === current) ? current : nextFiles[0]?.relative_path || "");
     } catch (err) {
       setError(apiErrorMessage(err));
     }
-  }, []);
+  }, [source]);
 
   useEffect(() => {
     void load();
@@ -79,12 +89,24 @@ export function DocumentsPage() {
 
   useEffect(() => {
     if (!selected) return;
-    void getSharedPreview(selected)
+    const previewFile = source === "workspace" ? getWorkspacePreview : getSharedPreview;
+    void previewFile(selected)
       .then((response) => setPreview(response.data))
       .catch((err) => setPreview({ status: "blocked", workspace_name: selected, name: selected, size_bytes: 0, text: apiErrorMessage(err) }));
-  }, [selected]);
+  }, [selected, source]);
+
+  useEffect(() => {
+    setResult(null);
+    setArtifactPath("");
+    setArtifactPreview(null);
+    setArtifactPreviewError("");
+    setMessage(selected ? "等待操作" : "等待选择文件");
+  }, [selected, source]);
 
   const selectedFile = useMemo(() => files.find((file) => file.relative_path === selected), [files, selected]);
+  const selectedAnalysisSupported = isDocumentAnalysisSupported(selected);
+  const analysisDisabled = !selected || !selectedAnalysisSupported;
+  const resultArtifacts = useMemo(() => documentResultArtifacts(result, scanResult), [result, scanResult]);
 
   async function run(label: string, action: (filePath: string) => Promise<{ data: DocumentResult }>) {
     if (!selected) {
@@ -119,6 +141,28 @@ export function DocumentsPage() {
     } catch (err) {
       setError(apiErrorMessage(err));
       setMessage("扫描处理失败");
+    } finally {
+      setScanBusy(false);
+    }
+  }
+
+  async function enhanceSelectedScan() {
+    if (!selected) {
+      setError("请先选择已上传的图片文件。");
+      return;
+    }
+    setScanBusy(true);
+    setError("");
+    setMessage("正在自动识别四角并矫正图片...");
+    try {
+      const response = await runScanEnhance(selected);
+      setScanResult(response.data);
+      const correction = scanCorrection(response.data);
+      setMessage(`四角矫正状态：${correction.status || response.data.status}`);
+      await load();
+    } catch (err) {
+      setError(apiErrorMessage(err));
+      setMessage("四角矫正失败");
     } finally {
       setScanBusy(false);
     }
@@ -295,6 +339,48 @@ export function DocumentsPage() {
     }
   }
 
+  async function openResultArtifact(path: string) {
+    setArtifactPath(path);
+    setArtifactPreview(null);
+    setArtifactPreviewError("");
+    setArtifactPreviewBusy(true);
+    try {
+      const response = await getWorkspacePreview(workspaceArtifactPath(path));
+      setArtifactPreview(response.data);
+    } catch (err) {
+      setArtifactPreviewError(apiErrorMessage(err));
+    } finally {
+      setArtifactPreviewBusy(false);
+    }
+  }
+
+  async function syncToWiki(filePath: string, title?: string) {
+    const workspaceName = workspaceArtifactPath(filePath);
+    if (!workspaceName) {
+      setError("没有可同步的文件。");
+      return;
+    }
+    setError("");
+    setWikiBusyPath(workspaceName);
+    setMessage("正在同步到 Wiki...");
+    try {
+      const response = await syncWorkspaceFileToWiki({
+        filePath: workspaceName,
+        title: title || workspaceName.split("/").pop() || "LeLamp 文档",
+      });
+      setWikiResult(response.data);
+      setMessage(`已同步到 Wiki：${response.data.docmost_page_title}`);
+      if (response.data.docmost_page_url) {
+        window.open(response.data.docmost_page_url, "_blank", "noopener,noreferrer");
+      }
+    } catch (err) {
+      setError(apiErrorMessage(err));
+      setMessage("同步到 Wiki 失败");
+    } finally {
+      setWikiBusyPath("");
+    }
+  }
+
   const adapterRows: DocumentAdapter[] = Object.entries(adapters).map(([name, status]) => ({
     name,
     status,
@@ -306,65 +392,59 @@ export function DocumentsPage() {
 
   return (
     <>
-      <PageHeader title="文档处理" description="上传或选择文件，执行总结、风险识别、表格提取和实体文档扫描" actions={<button className="ghost-button" onClick={() => void load()}>刷新</button>} />
+      <PageHeader title="文档处理" description="选择文件后直接查看、分析或扫描" actions={<button className="ghost-button" onClick={() => void load()}>刷新</button>} />
       <div className="page-grid">
         {error && <div className="danger-panel">操作失败：{error}</div>}
-        <div className="grid-2">
-          <Card title="选择文档来源" subtitle="默认只处理用户主动上传或拖入的文件。">
-            <div className="source-selector">
+        <Card title="文件与操作" subtitle="上传区和工作区文件都可预览；分析只作用于当前选择文件。">
+          <div className="document-command-strip">
+            <div className="document-source-tabs" role="tablist" aria-label="文档来源">
               {["shared_inbox", "workspace"].map((item) => (
-                <button className={source === item ? "selected" : ""} key={item} onClick={() => setSource(item)}>
-                  <FileText size={20} />
-                  <strong>{item === "shared_inbox" ? "上传文件" : "工作区文件"}</strong>
-                  <span>{item === "shared_inbox" ? "用户拖入或上传的资料" : "由系统生成的处理结果"}</span>
-                  <StatusBadge status={item === "shared_inbox" ? "available" : "adapter_ready"} label={item === "shared_inbox" ? "可用" : "受限"} />
+                <button className={source === item ? "selected" : ""} key={item} onClick={() => setSource(item)} type="button">
+                  <FileText size={16} />
+                  {item === "shared_inbox" ? "上传文件" : "工作区"}
                 </button>
               ))}
             </div>
-          </Card>
-          <Card title="选择文件">
-            <select className="select" value={selected} onChange={(event) => setSelected(event.target.value)}>
+            <select className="select document-file-select" value={selected} onChange={(event) => setSelected(event.target.value)}>
               {files.map((file) => <option value={file.relative_path} key={file.relative_path}>{file.relative_path}</option>)}
             </select>
-            <div className="selected-file">
-              <strong>{selectedFile?.name ?? "暂无文件"}</strong>
-              <span className="small">{selected ? compactDisplayPath(selected) : "请先上传文件"}</span>
-              <span className="small muted">{selectedFile?.mime_type ?? "-"} · {selectedFile?.size_label ?? "-"} · {selectedFile?.uploaded_at ?? "-"}</span>
-            </div>
-            <div className="row">
-              <button className="ghost-button" onClick={() => void load()}>更换/刷新文件</button>
-              <button className="ghost-button" disabled>不提供服务器全盘浏览</button>
-            </div>
-          </Card>
-        </div>
-
-        <div className="grid-5">
-          <Card className="action-card" title="文档分析">
-            <FileText size={26} />
-            <p>结构解析、段落与要点识别</p>
-            <button className="ghost-button" onClick={() => void run("文档分析", runDocumentAnalyze)} disabled={!selected}>开始分析</button>
-          </Card>
-          <Card className="action-card" title="汇报提纲">
-            <ListTree size={26} />
-            <p>调用模型整理成汇报结构</p>
-            <button className="ghost-button" onClick={() => void run("汇报提纲", (file) => runDocumentReportOutline(file, selectedFile?.name ?? "汇报提纲"))} disabled={!selected}>生成提纲</button>
-          </Card>
-          <Card className="action-card" title="风险标记">
-            <AlertTriangle size={26} />
-            <p>识别条款风险与合规问题</p>
-            <button className="ghost-button" onClick={() => void run("风险扫描", runDocumentRisks)} disabled={!selected}>运行风险扫描</button>
-          </Card>
-          <Card className="action-card" title="关键数据表">
-            <Table2 size={26} />
-            <p>调用模型抽取关键数据为 CSV</p>
-            <button className="ghost-button" onClick={() => void run("表格提取", runDocumentTableExtract)} disabled={!selected}>运行提取</button>
-          </Card>
-          <Card className="action-card" title="扫描状态">
-            <ScanLine size={26} />
-            <p>摄像头采集、图像增强、文字与结构识别</p>
-            <button className="ghost-button" onClick={() => setMessage(`扫描：${friendlyStatus(adapters.scan_capture ?? "adapter_ready")} / 文字识别：${friendlyStatus(adapters.ocr ?? "unavailable")}`)}>检查状态</button>
-          </Card>
-        </div>
+            <button className="ghost-button" onClick={() => void load()}>刷新列表</button>
+          </div>
+          <div className="selected-file selected-file--compact">
+            <strong>{selectedFile?.name ?? "暂无文件"}</strong>
+            <span className="small">{selected ? compactDisplayPath(selected) : "请先上传文件"}</span>
+            <span className="small muted">{selectedFile?.mime_type ?? "-"} · {selectedFile?.size_label ?? "-"} · {selectedFile?.uploaded_at ?? "-"}</span>
+          </div>
+          <div className="document-action-row">
+            <button className="primary-button" onClick={() => void run("文档分析", runDocumentAnalyze)} disabled={analysisDisabled}>
+              <FileText size={16} /> 分析
+            </button>
+            <button className="ghost-button" onClick={() => void run("汇报提纲", (file) => runDocumentReportOutline(file, selectedFile?.name ?? "汇报提纲"))} disabled={analysisDisabled}>
+              <ListTree size={16} /> 提纲
+            </button>
+            <button className="ghost-button" onClick={() => void run("风险扫描", runDocumentRisks)} disabled={analysisDisabled}>
+              <AlertTriangle size={16} /> 风险
+            </button>
+            <button className="ghost-button" onClick={() => void run("表格提取", runDocumentTableExtract)} disabled={analysisDisabled}>
+              <Table2 size={16} /> 表格
+            </button>
+            <button className="ghost-button" onClick={() => setMessage(`扫描：${friendlyStatus(adapters.scan_capture ?? "adapter_ready")} / 文字识别：${friendlyStatus(adapters.ocr ?? "unavailable")}`)}>
+              <ScanLine size={16} /> 扫描状态
+            </button>
+            <button className="ghost-button" onClick={() => void syncToWiki(selected, selectedFile?.name)} disabled={!selected || wikiBusyPath === workspaceArtifactPath(selected)}>
+              <BookOpen size={16} /> {wikiBusyPath === workspaceArtifactPath(selected) ? "同步中..." : "同步到 Wiki"}
+            </button>
+          </div>
+          <div className="document-status-line">
+            <StatusBadge status={!selectedAnalysisSupported && selected ? "unsupported" : result?.status ?? preview?.status ?? "pending"} />
+            <span>{!selectedAnalysisSupported && selected ? "该文件类型可查看/下载，但不能做文本分析。" : message}</span>
+          </div>
+          {wikiResult?.docmost_page_url && (
+            <a className="card-link" href={wikiResult.docmost_page_url} target="_blank" rel="noreferrer">
+              <ExternalLink size={16} /> 打开最近同步的 Wiki 页面
+            </a>
+          )}
+        </Card>
 
         <div className="scan-workbench">
           <Card title="实体文档采集" subtitle="手机全能扫描王式流程：拍照/上传、边界校正、增强、文字与结构识别" action={<StatusBadge status={scanResult?.status ?? adapters.ocr ?? "pending"} />}>
@@ -390,8 +470,11 @@ export function DocumentsPage() {
               <button className="ghost-button" onClick={() => uploadInputRef.current?.click()} disabled={scanBusy}>
                 <FileImage size={16} /> 上传图片扫描
               </button>
+              <button className="ghost-button" onClick={() => void enhanceSelectedScan()} disabled={scanBusy || !selected}>
+                <ScanLine size={16} /> 四角矫正/增强
+              </button>
               <button className="ghost-button" onClick={() => void processSelectedScan()} disabled={scanBusy || !selected}>
-                <ScanLine size={16} /> 处理当前图片
+                <ScanLine size={16} /> 处理并 OCR
               </button>
               <button className="ghost-button" onClick={() => void checkSelectedCaptureReadiness()} disabled={scanBusy || !selected}>
                 判断自动拍照候选
@@ -434,9 +517,9 @@ export function DocumentsPage() {
               }}
             />
             <div className="scan-capability-grid">
-              <span>自动边界</span><StatusBadge status={scanResult?.enhancement ? "completed" : "adapter_ready"} />
-              <span>视觉校正</span><StatusBadge status={scanResult?.enhancement ? "completed" : "adapter_ready"} />
-              <span>去阴影/增强</span><StatusBadge status={scanResult?.enhancement ? "completed" : "adapter_ready"} />
+              <span>自动边界</span><StatusBadge status={scanEnhancement(scanResult) ? "completed" : "adapter_ready"} />
+              <span>视觉校正</span><StatusBadge status={String(scanCorrection(scanResult).status) === "detected" ? "completed" : scanEnhancement(scanResult) ? "adapter_ready" : "adapter_ready"} label={String(scanCorrection(scanResult).status || "") || undefined} />
+              <span>去阴影/增强</span><StatusBadge status={scanEnhancement(scanResult) ? "completed" : "adapter_ready"} />
               <span>文字/结构识别</span><StatusBadge status={scanResult?.status ?? adapters.ocr ?? "backend_missing"} />
               <span>视觉识别</span><StatusBadge status={adapters.vision_ocr ?? "backend_missing"} />
               <span>自动拍照候选</span><StatusBadge status={String(captureReadiness?.status ?? "pending")} />
@@ -446,12 +529,15 @@ export function DocumentsPage() {
           <Card title="扫描结果" action={<StatusBadge status={scanResult?.status ?? "pending"} />}>
             <div className="definition-grid">
               <span>原图</span><strong>{scanResult?.source_workspace_name || scanResult?.image ? "已保存" : "-"}</strong>
-              <span>增强图</span><strong>{scanResult?.enhancement?.enhanced_workspace_name ? "已生成" : "-"}</strong>
+              <span>四角状态</span><strong>{String(scanCorrection(scanResult).status ?? "-")}</strong>
+              <span>四角置信度</span><strong>{String(scanCorrection(scanResult).confidence ?? "-")}</strong>
+              <span>增强图</span><strong>{scanEnhancement(scanResult)?.enhanced_workspace_name ? "已生成" : "-"}</strong>
               <span>识别文本</span><strong>{scanResult?.text_path ? "已生成" : "-"}</strong>
               <span>结构识别</span><strong>{scanResult?.structure_path ? "已生成" : "-"}</strong>
               <span>表格文件</span><strong>{scanResult?.table_paths?.length ? `${scanResult.table_paths.length} 个` : "-"}</strong>
               <span>拍照候选</span><strong>{String(captureReadiness?.stable_score ?? "-")}</strong>
             </div>
+            <ScanArtifactLinks scanResult={scanResult} />
             <details className="advanced-panel">
               <summary>扫描诊断</summary>
               <div className="advanced-panel__content">
@@ -462,77 +548,88 @@ export function DocumentsPage() {
           </Card>
         </div>
 
-        <div className="grid-3">
-          <Card title="文档整理成汇报提纲" action={<StatusBadge status={adapters.report_outline ?? "backend_missing"} />}>
-            <div className="office-api-card">
-              <ListTree size={22} />
-              <span>调用模型读取已授权文档，生成 Markdown 汇报提纲和 PPT 页级结构。</span>
-              <button className="primary-button" onClick={() => void run("汇报提纲", (file) => runDocumentReportOutline(file, selectedFile?.name ?? "汇报提纲"))} disabled={!selected}>生成汇报提纲</button>
-            </div>
-          </Card>
-          <Card title="关键数据提取成表格" action={<StatusBadge status={adapters.table_extractor ?? "backend_missing"} />}>
-            <div className="office-api-card">
-              <Table2 size={22} />
-              <span>调用模型抽取指标、事实、责任人、依据，写入 CSV 文件。</span>
-              <button className="primary-button" onClick={() => void run("关键数据表", runDocumentTableExtract)} disabled={!selected}>生成关键数据表</button>
-            </div>
-          </Card>
-          <Card title="会议纪要生成邮件" action={<StatusBadge status={adapters.meeting_email_draft ?? "backend_missing"} />}>
-            <div className="office-api-card">
-              <Mail size={22} />
-              <span>在 Meeting 页面选择 transcript 后生成会后邮件草稿，不自动发送。</span>
-              <a className="ghost-button office-api-link" href="/meeting">打开 Meeting 页面</a>
-            </div>
-          </Card>
-        </div>
-
         <div className="documents-grid">
           <Card title="文档预览">
-            <div className="doc-preview">
-              <div className="doc-page">
-                <strong>{preview?.name ?? "等待预览"}</strong>
-                {preview?.document_text_backend && <span className="small muted">文档已解析</span>}
-                {preview?.status === "ok" ? <pre className="json-preview">{preview.text}</pre> : <p>{preview?.text ?? "二进制文件无法直接预览，可下载或等待解析。"}</p>}
-                {preview && <StatusBadge status={preview.status} />}
-              </div>
-            </div>
+            <WorkspaceFileViewer
+              source={source === "workspace" ? "workspace" : "shared_inbox"}
+              filePath={selected}
+              preview={preview}
+              title="文档查看"
+            />
           </Card>
           <div className="stack">
-            <Card title="结构化分析结果" action={<StatusBadge status={result?.status ?? "pending"} />}>
-              <div className="definition-grid">
-                <span>状态</span><StatusBadge status={result?.status ?? "pending"} />
-                <span>输出数</span><strong>{result?.outputs?.length ?? 0}</strong>
-                <span>摘要</span><strong>{result?.summary ?? message}</strong>
+            <Card title="分析摘要" action={<StatusBadge status={result?.status ?? "pending"} />}>
+              <div className="document-result-summary">
+                <div>
+                  <span>输出</span>
+                  <strong>{result?.outputs?.length ?? 0}</strong>
+                </div>
+                <div>
+                  <span>风险</span>
+                  <strong>{result?.risks?.length ?? 0}</strong>
+                </div>
+                <div>
+                  <span>表格</span>
+                  <strong>{result?.table_path || scanResult?.table_paths?.length ? "已生成" : "-"}</strong>
+                </div>
               </div>
+              <p className="blue-note">{String(result?.summary ?? message)}</p>
+              <details className="advanced-panel compact-details">
+                <summary>元数据</summary>
+                <div className="list-rows compact">
+                  {Object.entries(result?.metadata ?? {}).slice(0, 8).map(([key, value]) => (
+                    <div className="row-between" key={key}>
+                      <span>{key}</span>
+                      <strong>{String(value)}</strong>
+                    </div>
+                  ))}
+                  {!Object.keys(result?.metadata ?? {}).length && <span className="small muted">等待分析结果。</span>}
+                </div>
+              </details>
             </Card>
-            <Card title="关键元数据">
-              <div className="list-rows compact">
-                {Object.entries(result?.metadata ?? {}).slice(0, 8).map(([key, value]) => (
-                  <div className="row-between" key={key}>
-                    <span>{key}</span>
-                    <strong>{String(value)}</strong>
-                  </div>
+            <Card title="结果文件" action={<StatusBadge status={resultArtifacts.length ? "available" : "pending"} label={`${resultArtifacts.length} 个`} />}>
+              <div className="document-artifact-list">
+                {resultArtifacts.map((artifact) => (
+                  <button
+                    className={artifact.workspaceName === artifactPath ? "document-artifact-button selected" : "document-artifact-button"}
+                    key={`${artifact.label}-${artifact.workspaceName}`}
+                    onClick={() => void openResultArtifact(artifact.workspaceName)}
+                    type="button"
+                  >
+                    <FileText size={16} />
+                    <span>{artifact.label}</span>
+                    <small>{compactDisplayPath(artifact.workspaceName)}</small>
+                  </button>
                 ))}
-                {!Object.keys(result?.metadata ?? {}).length && <span className="small muted">等待分析结果。</span>}
+                {!resultArtifacts.length && <div className="blue-note">运行分析、提纲、表格提取或扫描后，结果文件会出现在这里。</div>}
               </div>
             </Card>
-          </div>
-          <div className="stack">
-            <Card title="风险标记" action={<StatusBadge status={result?.risks?.length ? "warning" : "adapter_ready"} label={`${result?.risks?.length ?? 0} 项风险`} />}>
+            {(artifactPath || artifactPreviewBusy || artifactPreviewError) && (
+              <Card
+                title="结果查看"
+                action={
+                  artifactPath ? (
+                    <button className="ghost-button" onClick={() => void syncToWiki(artifactPath, artifactPath.split("/").pop())} disabled={wikiBusyPath === workspaceArtifactPath(artifactPath)}>
+                      <BookOpen size={16} /> {wikiBusyPath === workspaceArtifactPath(artifactPath) ? "同步中..." : "同步到 Wiki"}
+                    </button>
+                  ) : undefined
+                }
+              >
+                <WorkspaceFileViewer
+                  source="workspace"
+                  filePath={workspaceArtifactPath(artifactPath)}
+                  preview={artifactPreview}
+                  busy={artifactPreviewBusy}
+                  error={artifactPreviewError}
+                  title="结果查看"
+                  compact
+                />
+              </Card>
+            )}
+            <Card title="风险" action={<StatusBadge status={result?.risks?.length ? "warning" : "adapter_ready"} label={`${result?.risks?.length ?? 0} 项风险`} />}>
               <div className="risk-list">
                 {(result?.risks ?? []).map((risk, index) => <div key={index}><StatusBadge status="warning" label={String(risk.level ?? "risk")} /> {String(risk.marker ?? JSON.stringify(risk))}</div>)}
                 {!result?.risks?.length && <div className="blue-note">尚未发现风险或未运行风险扫描。</div>}
-              </div>
-            </Card>
-            <Card title="表格提取预览" action={<StatusBadge status={result?.adapter_status?.table_extractor ?? "backend_missing"} />}>
-              <div className="blue-note">{result?.table_path || scanResult?.table_paths?.length ? "表格结果已生成，可在输出文件中查看。" : String(result?.summary ?? "表格结构识别未必可用，状态以实际处理结果为准。")}</div>
-            </Card>
-            <Card title="输出文件">
-              <div className="definition-grid">
-                <span>汇报提纲</span><strong>{result?.outline_path ? "已生成" : "-"}</strong>
-                <span>关键数据表</span><strong>{result?.table_path ? "已生成" : "-"}</strong>
-                <span>处理方式</span><strong>{result?.model ? "模型处理" : "-"}</strong>
-                <span>扫描摘要</span><strong>{String(scanResult?.summary ?? "-")}</strong>
               </div>
             </Card>
           </div>
@@ -580,8 +677,91 @@ function friendlyStatus(status: unknown) {
     adapter_ready: "待接入",
     backend_missing: "待接入",
     needs_config: "待配置",
+    unsupported: "不支持",
   };
   return labels[value] ?? (value || "等待");
+}
+
+interface DocumentArtifact {
+  label: string;
+  workspaceName: string;
+}
+
+function documentResultArtifacts(result: DocumentResult | null, scanResult: ScanResult | null): DocumentArtifact[] {
+  const artifacts: DocumentArtifact[] = [];
+  const add = (label: string, value: unknown) => {
+    if (typeof value !== "string" || !value.trim()) return;
+    const workspaceName = workspaceArtifactPath(value);
+    if (!workspaceName) return;
+    artifacts.push({ label, workspaceName });
+  };
+  add("分析结果", result?.analysis_path);
+  add("文档摘要", result?.summary_path);
+  add("汇报提纲", result?.outline_path);
+  add("关键数据表", result?.table_path);
+  add("扫描纪要", scanResult?.summary_path);
+  add("OCR 文本", scanResult?.text_path);
+  add("扫描结构", scanResult?.structure_path);
+  (scanResult?.table_paths ?? []).forEach((path, index) => add(`扫描表格 ${index + 1}`, path));
+  (result?.outputs ?? []).forEach((output) => add(outputArtifactLabel(output.path, output.type), output.path));
+  return uniqueDocumentArtifacts(artifacts);
+}
+
+function outputArtifactLabel(pathValue: string, type: string) {
+  const lower = `${pathValue} ${type}`.toLowerCase();
+  if (lower.includes("outline")) return "汇报提纲";
+  if (lower.includes("analysis")) return "分析结果";
+  if (lower.includes("summary") || lower.includes("minutes")) return "纪要/摘要";
+  if (lower.includes("table") || lower.endsWith(".csv")) return "关键数据表";
+  return type ? `输出：${type}` : "输出文件";
+}
+
+function workspaceArtifactPath(pathValue: string) {
+  const normalized = String(pathValue || "").trim().replace(/\\/g, "/");
+  const marker = "/workspace/";
+  const markerIndex = normalized.lastIndexOf(marker);
+  if (markerIndex >= 0) return normalized.slice(markerIndex + marker.length);
+  const runtimeMarker = "/lelamp_runtime/workspace/";
+  const runtimeIndex = normalized.lastIndexOf(runtimeMarker);
+  if (runtimeIndex >= 0) return normalized.slice(runtimeIndex + runtimeMarker.length);
+  return normalized.replace(/^\.\//, "");
+}
+
+function uniqueDocumentArtifacts(artifacts: DocumentArtifact[]) {
+  const seen = new Set<string>();
+  return artifacts.filter((artifact) => {
+    if (seen.has(artifact.workspaceName)) return false;
+    seen.add(artifact.workspaceName);
+    return true;
+  });
+}
+
+function isDocumentAnalysisSupported(pathValue: string) {
+  const suffix = fileSuffix(pathValue);
+  return new Set([
+    ".txt",
+    ".md",
+    ".markdown",
+    ".csv",
+    ".tsv",
+    ".json",
+    ".jsonl",
+    ".yaml",
+    ".yml",
+    ".log",
+    ".html",
+    ".xml",
+    ".pdf",
+    ".docx",
+    ".pptx",
+    ".xlsx",
+  ]).has(suffix);
+}
+
+function fileSuffix(pathValue: string) {
+  const name = String(pathValue || "").replace(/\\/g, "/").split("/").pop() || "";
+  const dot = name.lastIndexOf(".");
+  return dot >= 0 ? name.slice(dot).toLowerCase() : "";
 }
 
 function compactDisplayPath(value?: string) {
@@ -594,6 +774,53 @@ function compactDisplayPath(value?: string) {
   const parts = normalized.split("/").filter(Boolean);
   if (parts.length <= 2) return normalized;
   return `.../${parts.slice(-2).join("/")}`;
+}
+
+function scanEnhancement(scanResult: ScanResult | null): Record<string, unknown> | null {
+  if (!scanResult) return null;
+  if (scanResult.enhancement && typeof scanResult.enhancement === "object") return scanResult.enhancement;
+  return scanResult;
+}
+
+function scanCorrection(scanResult: ScanResult | null): Record<string, unknown> {
+  const enhancement = scanEnhancement(scanResult);
+  const correction = enhancement?.auto_corner_correction;
+  return correction && typeof correction === "object" ? correction as Record<string, unknown> : {};
+}
+
+function scanWorkspaceValue(scanResult: ScanResult | null, key: string): string {
+  const enhancement = scanEnhancement(scanResult);
+  const value = enhancement?.[key];
+  return typeof value === "string" ? value : "";
+}
+
+function workspaceImageUrl(workspaceName: string): string {
+  const token = readToken();
+  const params = new URLSearchParams({ file: workspaceName });
+  if (token) params.set("token", token);
+  return `/api/scene/image?${params.toString()}`;
+}
+
+function ScanArtifactLinks({ scanResult }: { scanResult: ScanResult | null }) {
+  const correction = scanCorrection(scanResult);
+  const cornerPreview = scanWorkspaceValue(scanResult, "corner_preview_workspace_name") || String(correction.preview_workspace_name ?? "");
+  const colorScan = scanWorkspaceValue(scanResult, "color_workspace_name") || scanWorkspaceValue(scanResult, "enhanced_workspace_name");
+  const ocrScan = scanWorkspaceValue(scanResult, "ocr_workspace_name");
+  const links = [
+    ["四角预览", cornerPreview],
+    ["矫正扫描图", colorScan],
+    ["OCR 增强图", ocrScan],
+  ].filter(([, workspaceName]) => workspaceName);
+  if (!links.length) return null;
+  return (
+    <div className="scan-artifact-links">
+      {links.map(([label, workspaceName]) => (
+        <a className="ghost-button" key={label} href={workspaceImageUrl(workspaceName)} target="_blank" rel="noreferrer">
+          {label}
+        </a>
+      ))}
+    </div>
+  );
 }
 
 async function fileToDataUrl(file: File): Promise<string> {

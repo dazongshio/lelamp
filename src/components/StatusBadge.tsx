@@ -13,6 +13,7 @@ const labelMap: Record<string, string> = {
   enabled: "已启用",
   success: "成功",
   completed: "已完成",
+  partial: "部分完成",
   running: "运行中",
   starting: "启动中",
   stopping: "停止中",
@@ -31,6 +32,7 @@ const labelMap: Record<string, string> = {
   needs_backend: "待接入",
   needs_confirmation: "请确认",
   needs_hardware: "需硬件",
+  unsupported: "不支持",
   optional: "可选增强",
   not_applicable: "不适用",
   deployment_note: "部署备注",
@@ -44,9 +46,9 @@ const labelMap: Record<string, string> = {
 
 function toneFor(status: string): string {
   if (["ok", "online", "enabled", "success", "completed", "implemented", "available"].includes(status)) return "success";
-  if (["warning", "degraded", "needs_confirmation", "draft", "pending", "adapter_ready"].includes(status)) return "warning";
+  if (["warning", "degraded", "needs_confirmation", "draft", "pending", "adapter_ready", "partial"].includes(status)) return "warning";
   if (["blocked", "error", "failed", "unavailable"].includes(status)) return "danger";
-  if (["backend_missing", "needs_backend", "needs_config", "needs_hardware", "optional", "not_applicable", "deployment_note", "offline", "empty"].includes(status)) return "gray";
+  if (["backend_missing", "needs_backend", "needs_config", "needs_hardware", "unsupported", "optional", "not_applicable", "deployment_note", "offline", "empty"].includes(status)) return "gray";
   return "primary";
 }
 

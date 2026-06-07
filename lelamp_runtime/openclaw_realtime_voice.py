@@ -16,12 +16,17 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from websocket import WebSocketConnectionClosedException
+
 from lelamp.office_agent.dashscope_realtime import (
     DashScopeRealtimeClient,
     DashScopeRealtimeConfig,
     DashScopeRealtimeError,
 )
+from lelamp.office_agent.hardware import LampHardware
 from lelamp.office_agent.hardware_probe import resolve_capture_device
+from lelamp.office_agent.lelamp_voice_skill import parse_lamp_voice_command
+from lelamp.office_agent.meeting_voice_skill import execute_runtime_meeting_voice_command
 from lelamp.office_agent.runtime import build_runtime
 from openclaw_voice import load_local_env
 
@@ -33,10 +38,10 @@ DEFAULT_INSTRUCTIONS = (
 
 REALTIME_PROFILES: dict[str, dict[str, Any]] = {
     "omni_realtime_v1": {
-        "description": "DashScope Qwen3 Omni Realtime, ALSA PCM, server VAD, JSONL latency logging.",
-        "model": "qwen3-omni-flash-realtime",
+        "description": "DashScope Qwen3.5 Omni Realtime, built-in search, ALSA PCM, server VAD, JSONL latency logging.",
+        "model": "qwen3.5-omni-plus-realtime",
         "url": "wss://dashscope.aliyuncs.com/api-ws/v1/realtime",
-        "voice": "Cherry",
+        "voice": "Tina",
         "input_rate": 16000,
         "output_rate": 24000,
         "frame_ms": 100,
@@ -44,6 +49,7 @@ REALTIME_PROFILES: dict[str, dict[str, Any]] = {
         "vad_threshold": 0.5,
         "silence_ms": 600,
         "transcription_model": "gummy-realtime-v1",
+        "enable_search": True,
         "instructions": DEFAULT_INSTRUCTIONS,
     }
 }
@@ -290,6 +296,11 @@ class LatencyTracker:
         with self._lock:
             return self._active_turn_id
 
+    @property
+    def current_or_last_turn_id(self) -> int | None:
+        with self._lock:
+            return self._active_turn_id or self._last_turn_id
+
     def mark_connected(self) -> None:
         self.connected_at = time.perf_counter()
 
@@ -419,6 +430,115 @@ class LatencyTracker:
         return round(end - start, 3)
 
 
+class LocalCommandSuppressor:
+    """Tracks realtime turns that were handled by local deterministic commands."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._turn_ids: set[int] = set()
+
+    def mark(self, turn_id: int | None) -> None:
+        if turn_id is None:
+            return
+        with self._lock:
+            self._turn_ids.add(turn_id)
+
+    def active(self, turn_id: int | None) -> bool:
+        if turn_id is None:
+            return False
+        with self._lock:
+            return turn_id in self._turn_ids
+
+    def discard(self, turn_id: int | None) -> None:
+        if turn_id is None:
+            return
+        with self._lock:
+            self._turn_ids.discard(turn_id)
+
+
+class BackgroundLampTaskRunner:
+    """Runs long local lamp tasks without blocking realtime voice events."""
+
+    def __init__(self, runtime: Any) -> None:
+        self.runtime = runtime
+        self._lock = threading.Lock()
+        self._threads: dict[str, threading.Thread] = {}
+
+    def start_scan_pdf(self, text: str) -> dict[str, object]:
+        with self._lock:
+            active = self._threads.get("scan_pdf")
+            if active is not None and active.is_alive():
+                return {
+                    "status": "busy",
+                    "reply": "扫描 PDF 正在后台执行，请等当前扫描完成。",
+                    "task": "scan_pdf",
+                }
+            task_id = uuid.uuid4().hex
+            thread = threading.Thread(
+                target=self._run_lamp_command,
+                args=("scan_pdf", task_id, text),
+                name=f"lamp-bg-scan-pdf-{task_id[:8]}",
+                daemon=True,
+            )
+            self._threads["scan_pdf"] = thread
+            thread.start()
+
+        self.runtime.audit.record(
+            "lelamp.voice_background.start",
+            status="started",
+            target=text,
+            details={"task": "scan_pdf", "task_id": task_id},
+        )
+        return {
+            "status": "started",
+            "reply": "已开始后台扫描 PDF，语音控制可以继续使用。",
+            "task": "scan_pdf",
+            "task_id": task_id,
+        }
+
+    def _run_lamp_command(self, task: str, task_id: str, text: str) -> None:
+        start = time.monotonic()
+        try:
+            result = self.runtime.lelamp_voice.handle_text(text)
+            status = str(result.get("status") or "unknown")
+            reply = str(result.get("reply") or "")
+            details = {
+                "task": task,
+                "task_id": task_id,
+                "handled": result.get("handled"),
+                "status": status,
+                "reply": reply,
+                "duration_ms": round((time.monotonic() - start) * 1000),
+                "pdf_workspace_name": result.get("pdf_workspace_name"),
+                "pdf_path": result.get("pdf_path"),
+            }
+            self.runtime.audit.record(
+                "lelamp.voice_background.done",
+                status=status,
+                target=text,
+                details=details,
+            )
+            print(f"\n[lamp/background] task={task} id={task_id[:8]} {status}: {reply}")
+        except Exception as exc:
+            self.runtime.audit.record(
+                "lelamp.voice_background.error",
+                status="error",
+                target=text,
+                details={
+                    "task": task,
+                    "task_id": task_id,
+                    "error": str(exc)[:1000],
+                    "duration_ms": round((time.monotonic() - start) * 1000),
+                },
+            )
+            print(f"\n[lamp/background] task={task} id={task_id[:8]} failed: {exc}", file=sys.stderr)
+        finally:
+            with self._lock:
+                active = self._threads.get(task)
+                if active is threading.current_thread():
+                    self._threads.pop(task, None)
+
+
 def print_latency_summary(summary: dict[str, Any]) -> None:
     keys = [
         ("speech_to_first_audio_seconds", "first_audio"),
@@ -465,6 +585,11 @@ def parse_args() -> argparse.Namespace:
         "--latency-log",
         default=None,
         help="JSONL latency log path. Defaults to workspace/.voice/realtime_latency.jsonl.",
+    )
+    parser.add_argument(
+        "--disable-lamp-voice-control",
+        action="store_true",
+        help="Do not execute local LeLamp commands from completed transcripts.",
     )
     parser.add_argument("--verbose", action="store_true")
     return parser.parse_args()
@@ -567,6 +692,7 @@ def main() -> None:
         env_value=runtime.config.dashscope_realtime_transcription_model,
         profile_value=profile["transcription_model"],
     )
+    enable_search = bool(profile.get("enable_search"))
     latency_log_path = (
         Path(args.latency_log).expanduser()
         if args.latency_log
@@ -584,6 +710,16 @@ def main() -> None:
         vad=vad,
         silence_ms=silence_ms,
     )
+    lamp_hardware_context = None
+    if not args.disable_lamp_voice_control:
+        lamp_hardware_context = LampHardware(
+            enabled=runtime.config.enable_hardware,
+            port=runtime.config.hardware_port,
+            lamp_id=runtime.config.lamp_id,
+            audit=runtime.audit,
+            rgb_enabled=runtime.config.enable_rgb,
+        )
+        runtime.lelamp_voice.set_hardware(lamp_hardware_context.__enter__())
 
     player = None
     if not args.no_playback:
@@ -597,8 +733,12 @@ def main() -> None:
 
     started_at = time.perf_counter()
     first_audio_latencies: list[float] = []
+    local_commands = LocalCommandSuppressor()
+    background_lamp_tasks = BackgroundLampTaskRunner(runtime)
 
     def on_audio_delta(pcm: bytes) -> None:
+        if local_commands.active(latency_tracker.current_or_last_turn_id):
+            return
         turn_id = latency_tracker.add_audio(len(pcm))
         if player is not None:
             player.write(pcm, turn_id=turn_id)
@@ -618,9 +758,57 @@ def main() -> None:
             if transcript:
                 latency_tracker.set_transcript(str(transcript))
                 print(f"\nYou: {transcript}")
+                meeting_result = runtime.meeting_voice.handle_text(
+                    str(transcript),
+                    executor=lambda command, raw_text: execute_runtime_meeting_voice_command(runtime, command, raw_text),
+                )
+                if meeting_result.get("handled"):
+                    turn_id = latency_tracker.active_turn_id
+                    local_commands.mark(turn_id)
+                    if player is not None:
+                        player.interrupt()
+                    try:
+                        client.cancel_response()
+                    except Exception as exc:
+                        if args.verbose:
+                            print(f"\n[local-command] response.cancel skipped: {exc}")
+                    reply = str(meeting_result.get("reply") or "已执行会议命令。")
+                    print(f"\n[meeting/local] turn={turn_id} {meeting_result.get('status')}: {reply}")
+                    return
+                if not args.disable_lamp_voice_control:
+                    lamp_command = parse_lamp_voice_command(str(transcript))
+                    if lamp_command is not None and lamp_command.action == "scan_pdf":
+                        turn_id = latency_tracker.active_turn_id
+                        local_commands.mark(turn_id)
+                        if player is not None:
+                            player.interrupt()
+                        try:
+                            client.cancel_response()
+                        except Exception as exc:
+                            if args.verbose:
+                                print(f"\n[local-command] response.cancel skipped: {exc}")
+                        lamp_result = background_lamp_tasks.start_scan_pdf(str(transcript))
+                        reply = str(lamp_result.get("reply") or "已开始后台扫描 PDF。")
+                        print(f"\n[lamp/local] turn={turn_id} {lamp_result.get('status')}: {reply}")
+                        return
+                    lamp_result = runtime.lelamp_voice.handle_text(str(transcript))
+                    if lamp_result.get("handled"):
+                        turn_id = latency_tracker.active_turn_id
+                        local_commands.mark(turn_id)
+                        if player is not None:
+                            player.interrupt()
+                        try:
+                            client.cancel_response()
+                        except Exception as exc:
+                            if args.verbose:
+                                print(f"\n[local-command] response.cancel skipped: {exc}")
+                        reply = str(lamp_result.get("reply") or "已执行台灯命令。")
+                        print(f"\n[lamp/local] turn={turn_id} {lamp_result.get('status')}: {reply}")
         elif event_type == "response.created":
             latency_tracker.mark("response_created_at")
         elif event_type == "response.audio_transcript.delta":
+            if local_commands.active(latency_tracker.current_or_last_turn_id):
+                return
             delta = event.get("delta")
             if delta:
                 print(delta, end="", flush=True)
@@ -637,6 +825,8 @@ def main() -> None:
         elif event_type == "response.done":
             latency_tracker.mark("response_done_at")
             summary = latency_tracker.finish(reason="response_done")
+            if summary is not None:
+                local_commands.discard(int(summary["turn_id"]))
             if summary is not None and args.verbose:
                 print_latency_summary(summary)
         elif event_type == "error":
@@ -656,6 +846,7 @@ def main() -> None:
         vad_threshold=vad_threshold,
         silence_duration_ms=silence_ms,
         transcription_model=transcription_model,
+        enable_search=enable_search,
     )
     client = DashScopeRealtimeClient(config, on_audio_delta=on_audio_delta, on_event=on_event)
     mic = ArecordStreamer(device=mic_device, sample_rate=input_rate, frame_ms=frame_ms)
@@ -663,7 +854,7 @@ def main() -> None:
     print("DashScope realtime voice loop started.")
     print(
         f"profile={args.profile} model={model} voice={voice} mic={mic_device}@{input_rate} "
-        f"speaker={speaker_device}@{output_rate} vad={vad}/{silence_ms}ms"
+        f"speaker={speaker_device}@{output_rate} vad={vad}/{silence_ms}ms search={enable_search}"
     )
     print(f"Latency log: {latency_log_path}")
 
@@ -688,7 +879,14 @@ def main() -> None:
                     meter_rms = 0
                     meter_peak = 0
                     last_meter_at = now
-            client.append_audio(frame)
+            try:
+                client.append_audio(frame)
+            except WebSocketConnectionClosedException:
+                print("\n[realtime] websocket closed; reconnecting", file=sys.stderr)
+                client.close()
+                client.connect()
+                latency_tracker.mark_connected()
+                client.append_audio(frame)
             if args.max_seconds and time.perf_counter() - started_at >= args.max_seconds:
                 break
     except (DashScopeRealtimeError, RuntimeError) as exc:
@@ -699,6 +897,8 @@ def main() -> None:
         client.close()
         if player is not None:
             player.close()
+        if lamp_hardware_context is not None:
+            lamp_hardware_context.__exit__(None, None, None)
         if first_audio_latencies:
             avg = sum(first_audio_latencies) / len(first_audio_latencies)
             print(f"\nAverage first-audio latency: {avg:.3f}s over {len(first_audio_latencies)} turns.")

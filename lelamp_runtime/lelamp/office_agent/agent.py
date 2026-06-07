@@ -15,6 +15,7 @@ from .environment import EnvironmentSensingService
 from .file_search import LocalFileSearchService
 from .hardware import LampHardware
 from .lelamp_experience import LeLampExperienceService
+from .lelamp_voice_skill import LeLampVoiceSkill
 from .meeting import MeetingService
 from .memory import MemoryService
 from .p0 import P0OfficeService
@@ -53,6 +54,7 @@ class OpenClawOfficeAgent(Agent):
         camera_observer: CameraObserverService,
         environment: EnvironmentSensingService,
         lelamp_experience: LeLampExperienceService,
+        lelamp_voice: LeLampVoiceSkill,
         smart_home: SmartHomeService,
         xiaoai: XiaoAiService,
         p0: P0OfficeService,
@@ -78,6 +80,8 @@ class OpenClawOfficeAgent(Agent):
         self.camera_observer = camera_observer
         self.environment = environment
         self.lelamp_experience = lelamp_experience
+        self.lelamp_voice = lelamp_voice
+        self.lelamp_voice.set_hardware(hardware)
         self.smart_home = smart_home
         self.xiaoai = xiaoai
         self.p0 = p0
@@ -138,6 +142,16 @@ class OpenClawOfficeAgent(Agent):
             state: idle, wake, listening, thinking, speaking, reminder, blocked, success, error, meeting, or projecting.
         """
         return json.dumps(self.lelamp_experience.state_cue(state), ensure_ascii=False, indent=2)
+
+    @function_tool
+    async def control_lamp_by_voice(self, text: str) -> str:
+        """
+        Parse and execute a deterministic LeLamp voice command.
+
+        Args:
+            text: User transcript such as 开灯, 关灯, 点头, 跟随我, or 停止跟随.
+        """
+        return json.dumps(self.lelamp_voice.handle_text(text), ensure_ascii=False, indent=2)
 
     @function_tool
     async def observe_desk_once(self, camera_index: int = 0) -> str:

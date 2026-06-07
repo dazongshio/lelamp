@@ -19,6 +19,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import wave
 import zipfile
 import sys
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
@@ -29,25 +30,34 @@ from email.message import EmailMessage
 from email.parser import BytesParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 from uuid import uuid4
+
+from lelamp.motion_config import get_named_pose, load_motion_config, save_motion_config, set_named_pose
+from lelamp.motor_control import LELAMP_MOTOR_ORDER, ordered_motor_names, write_goal_position_ordered
 
 from .desktop_companion import DesktopCompanionService
 from .desktop_automation import parse_browser_step
+from .docmost import DocmostError, build_docmost_markdown
 from .documents import DOCUMENT_WORKFLOW_SUFFIXES, DocumentExtractionError
 from .audio_api import AudioAPIError, OpenAIAudioAPI
 from .dashscope_tts import DashScopeTTS, DashScopeTTSError
 from .elevenlabs_tts import ElevenLabsError, ElevenLabsTTS
+from .hardware import LampHardware
 from .hardware_probe import play_audio_file, play_speaker_tone, probe_hardware, record_microphone_sample
+from .lelamp_voice_skill import parse_lamp_voice_command
+from .meeting_voice_skill import MeetingVoiceCommand, default_meeting_title, parse_meeting_voice_command
 from .llm import LLMError, ResponsesLLM, ResponsesLLMConfig
 from .projection import redact_projection_text
 from .projection_viewer import ProjectionPreviewServer, build_display_profile, latest_projection_file, markdown_to_html, save_display_profile
 from .product_checklist import build_product_checklist
 from .runtime import OfficeRuntime
 from .scene import SCENE_WORKFLOW_VERSION
-from .shared_space import SharedSpaceService, find_lan_ip
+from .shared_space import TEXT_PREVIEW_SUFFIXES, SharedSpaceService, find_lan_ip
 from .target_validation import build_target_validation_report, run_target_validation
 from .config import tingwu_credential_next_actions
+from .dashscope_asr import DashScopeASR
+from .groq_asr import GroqASR
 from .tingwu_meeting import (
     PLACEHOLDER_CAPTURE_DEVICES,
     TingwuMeetingError,
@@ -102,6 +112,7 @@ TEST_PNG_BYTES = bytes.fromhex(
 
 WEB_CONSOLE_DIST = Path(__file__).resolve().parents[3] / "dist"
 MAX_TASK_EVENTS = 200
+LELAMP_CONTROL_MOTORS = LELAMP_MOTOR_ORDER
 OFFICIAL_TINGWU_HTTP_URL = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
 OFFICIAL_TINGWU_WS_URL = "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
 
@@ -189,6 +200,8 @@ class WebConsoleServer:
         self._desktop_companion_last_run: dict[str, object] | None = None
         self._voice_conversation_lock = threading.RLock()
         self._voice_conversations: dict[str, dict[str, object]] = {}
+        self._lelamp_voice_lock = threading.RLock()
+        self._lelamp_voice_hardware: LampHardware | None = None
         self._projection_preview_lock = threading.RLock()
         self._projection_preview_httpd: ThreadingHTTPServer | None = None
         self._projection_preview_thread: threading.Thread | None = None
@@ -237,6 +250,22 @@ class WebConsoleServer:
                     if parsed.path == "/api/shared/download":
                         params = urllib.parse.parse_qs(parsed.query)
                         self._send_download(server.api_shared_download(params.get("file", [""])[0], ctx))
+                        return
+                    if parsed.path == "/api/shared/file":
+                        params = urllib.parse.parse_qs(parsed.query)
+                        self._send_file(server.api_shared_download(params.get("file", [""])[0], ctx))
+                        return
+                    if parsed.path == "/api/workspace/download":
+                        params = urllib.parse.parse_qs(parsed.query)
+                        self._send_download(server.api_workspace_file(params.get("file", [""])[0], ctx, action="workspace.download"))
+                        return
+                    if parsed.path == "/api/workspace/file":
+                        params = urllib.parse.parse_qs(parsed.query)
+                        self._send_file(server.api_workspace_file(params.get("file", [""])[0], ctx, action="workspace.file"))
+                        return
+                    if parsed.path == "/api/scene/image":
+                        params = urllib.parse.parse_qs(parsed.query)
+                        self._send_file(server.api_scene_image(params.get("file", [""])[0], ctx))
                         return
                     if parsed.path == "/api/audit/export.csv":
                         self._send_csv(server.api_audit_export(parsed.query, ctx))
@@ -340,6 +369,15 @@ class WebConsoleServer:
                 self.end_headers()
                 self.wfile.write(data)
 
+            def _send_file(self, path: Path) -> None:
+                data = path.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", mimetypes.guess_type(path.name)[0] or "application/octet-stream")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
             def _send_csv(self, payload: tuple[str, bytes]) -> None:
                 filename, data = payload
                 self.send_response(200)
@@ -395,6 +433,7 @@ class WebConsoleServer:
         except KeyboardInterrupt:
             pass
         finally:
+            self.stop_lelamp_voice_hardware()
             self.stop_projection_preview_service()
             httpd.server_close()
             self.audit.record("web_console.stop", target=local_url)
@@ -432,11 +471,13 @@ class WebConsoleServer:
 
         pose_name = os.getenv("LELAMP_STARTUP_HOME_POSE", "lelamp_center").strip() or "lelamp_center"
         pose_path = self.runtime.config.workspace_dir / ".poses" / f"{safe_filename(pose_name)}.json"
-        if not pose_path.exists():
+        configured_default_pose = get_named_pose(load_motion_config(self.motion_config_path()), "default")
+        if not configured_default_pose and not pose_path.exists():
             result = {
                 "status": "missing",
-                "message": f"Startup home pose is missing: {pose_path}",
+                "message": f"Startup home pose is missing in motion config and pose file: {pose_path}",
                 "pose_path": str(pose_path),
+                "motion_config_path": str(self.motion_config_path()),
             }
             self.audit.record("lelamp_startup_home", status="missing", target=str(pose_path), details=result)
             return result
@@ -447,12 +488,13 @@ class WebConsoleServer:
             from lelamp.person_tracker import TRACKING_MOTORS, load_pose, read_current_pose
 
             max_step = clamp_number(optional_float(os.getenv("LELAMP_STARTUP_HOME_MAX_STEP")), default=4.0, low=0.5, high=8.0)
-            tolerance = clamp_number(optional_float(os.getenv("LELAMP_STARTUP_HOME_TOLERANCE")), default=2.0, low=0.3, high=5.0)
-            step_seconds = clamp_number(optional_float(os.getenv("LELAMP_STARTUP_HOME_SLEEP")), default=0.06, low=0.02, high=0.3)
-            max_iterations = max(1, min(80, safe_int(os.getenv("LELAMP_STARTUP_HOME_STEPS"), 35)))
+            tolerance = clamp_number(optional_float(os.getenv("LELAMP_STARTUP_HOME_TOLERANCE")), default=0.5, low=0.3, high=5.0)
+            step_seconds = clamp_number(optional_float(os.getenv("LELAMP_STARTUP_HOME_SLEEP")), default=0.12, low=0.02, high=0.4)
+            configured_iterations = safe_int(os.getenv("LELAMP_STARTUP_HOME_STEPS"), 0)
+            max_iterations = max(1, min(240, configured_iterations)) if configured_iterations > 0 else None
             port = str(self.runtime.config.hardware_port or "/dev/ttyACM0")
-            target_pose = load_pose(pose_path)
-            bus = self.connect_lelamp_motor_bus(port=port, max_step=max_step)
+            target_pose = configured_default_pose or load_pose(pose_path)
+            bus = self.connect_lelamp_motor_bus(port=port, max_step=None)
             initial_pose = read_current_pose(bus)
             actual_pose, movement_trace = self.move_lelamp_pose_in_steps(
                 bus,
@@ -463,7 +505,11 @@ class WebConsoleServer:
                 tolerance=tolerance,
                 max_iterations=max_iterations,
             )
-            reached = all(abs(float(target_pose[motor]) - float(actual_pose[motor])) <= tolerance for motor in TRACKING_MOTORS)
+            errors = {
+                motor: round(abs(float(target_pose[motor]) - float(actual_pose[motor])), 4)
+                for motor in TRACKING_MOTORS
+            }
+            reached = all(value <= tolerance for value in errors.values())
             status = "completed" if reached else "timeout"
             result = {
                 "status": status,
@@ -480,6 +526,8 @@ class WebConsoleServer:
                 "initial_pose": initial_pose,
                 "target_pose": target_pose,
                 "actual_pose": actual_pose,
+                "errors": errors,
+                "worst_motor": max(errors, key=errors.get) if errors else "",
                 "duration_ms": round((time.monotonic() - started) * 1000, 1),
             }
             self.audit.record(
@@ -516,6 +564,7 @@ class WebConsoleServer:
             "/assistant",
             "/meeting",
             "/documents",
+            "/wiki",
             "/checklist",
             "/projection",
             "/desktop",
@@ -524,6 +573,7 @@ class WebConsoleServer:
             "/mobile",
             "/smart-home",
             "/voice",
+            "/motors",
             "/hardware",
             "/audit",
             "/settings",
@@ -560,7 +610,7 @@ class WebConsoleServer:
         content_type = mimetypes.guess_type(asset_path.name)[0] or "application/octet-stream"
         handler.send_response(200)
         handler.send_header("Content-Type", content_type)
-        handler.send_header("Cache-Control", "public, max-age=31536000, immutable")
+        handler.send_header("Cache-Control", "no-store")
         handler.send_header("Content-Length", str(len(data)))
         handler.end_headers()
         handler.wfile.write(data)
@@ -641,6 +691,10 @@ class WebConsoleServer:
             return self.api_shared_files(params, ctx)
         if path == "/api/shared/preview":
             return self.api_shared_preview(params.get("file", [""])[0], ctx)
+        if path == "/api/workspace/files":
+            return self.api_workspace_files(params, ctx)
+        if path == "/api/workspace/preview":
+            return self.api_workspace_preview(params.get("file", [""])[0], ctx)
         if path == "/api/audit/recent":
             return self.api_recent_audit_from_params(params, ctx)
         if path == "/api/audit/search":
@@ -716,6 +770,8 @@ class WebConsoleServer:
             return self.api_task_get(task_id, ctx)
         if path == "/api/document/adapters/status":
             return self.api_document_adapters_status(ctx)
+        if path == "/api/docmost/status":
+            return self.api_docmost_status(ctx)
         if path == "/api/meeting/jobs":
             return self.api_meeting_jobs(ctx)
         if path == "/api/meeting/status":
@@ -745,6 +801,8 @@ class WebConsoleServer:
             return self.api_document_table_extract(payload, ctx)
         if path == "/api/document/report-outline":
             return self.api_document_report_outline(payload, ctx)
+        if path == "/api/docmost/sync-file":
+            return self.api_docmost_sync_file(payload, ctx)
         if path == "/api/scan/register":
             filename = require_string(payload, "filename")
             document_type = str(payload.get("document_type") or "document")
@@ -758,6 +816,9 @@ class WebConsoleServer:
             language = str(payload.get("language") or "chi_sim+eng")
             document_type = str(payload.get("document_type") or "document")
             return self.runtime.scanning.process_scan_image(filename, document_type=document_type, language=language)
+        if path == "/api/scan/enhance":
+            filename = require_string(payload, "filename")
+            return self.runtime.scanning.enhance_scan_image(filename)
         if path == "/api/scan/capture-readiness":
             filename = require_string(payload, "filename")
             return self.runtime.scanning.capture_readiness(filename)
@@ -785,9 +846,10 @@ class WebConsoleServer:
             language = str(payload.get("language") or "chi_sim+eng")
             document_type = str(payload.get("document_type") or "document")
             camera_index = self.resolve_camera_index(payload.get("camera_index"))
+            rotation_degrees = self.scene_camera_rotation_degrees(camera_index, payload)
             timeout_seconds = max(3, min(20, safe_int(payload.get("timeout_seconds"), 12)))
             executor = ThreadPoolExecutor(max_workers=1)
-            future = executor.submit(self.runtime.camera_observer.capture_frame, camera_index=camera_index)
+            future = executor.submit(self.runtime.camera_observer.capture_frame, camera_index=camera_index, rotation_degrees=rotation_degrees)
             try:
                 capture = future.result(timeout=timeout_seconds)
             except FutureTimeoutError:
@@ -797,17 +859,19 @@ class WebConsoleServer:
                     "message": f"设备摄像头拍照超过 {timeout_seconds} 秒未返回。",
                     "camera_index": camera_index,
                     "timeout_seconds": timeout_seconds,
+                    "rotation_degrees": rotation_degrees,
                 }
             finally:
                 executor.shutdown(wait=False, cancel_futures=True)
             if str(capture.get("status") or "") != "captured":
-                fallback_capture = self.capture_from_camera_preview_snapshot(title, camera_index=camera_index)
+                fallback_capture = self.capture_from_camera_preview_snapshot(title, camera_index=camera_index, rotation_degrees=rotation_degrees)
                 if str(fallback_capture.get("status") or "") != "captured":
                     return {
                         "status": "unavailable",
                         "message": "设备摄像头没有拍到图片，请检查摄像头连接或改用浏览器摄像头/上传图片。",
                         "capture": capture,
                         "fallback_capture": fallback_capture,
+                        "rotation_degrees": rotation_degrees,
                     }
                 capture = fallback_capture
             capture_path = str(capture.get("path") or "")
@@ -818,6 +882,7 @@ class WebConsoleServer:
             )
             result["capture"] = capture
             result["source_image_path"] = capture_path
+            result["rotation_degrees"] = rotation_degrees
             try:
                 result["source_workspace_name"] = str(Path(capture_path).resolve().relative_to(self.runtime.config.workspace_dir.resolve()))
             except ValueError:
@@ -909,12 +974,24 @@ class WebConsoleServer:
         if path == "/api/lelamp/state":
             state = require_string(payload, "state")
             return self.api_lelamp_state(state, ctx)
+        if path == "/api/lelamp/motor-control/read":
+            return self.api_lelamp_motor_control_read(ctx)
+        if path == "/api/lelamp/motor-control/move":
+            return self.api_lelamp_motor_control_move(payload, ctx)
+        if path == "/api/lelamp/motor-control/save-pose":
+            return self.api_lelamp_motor_control_save_pose(payload, ctx)
+        if path == "/api/lelamp/voice-command":
+            return self.api_lelamp_voice_command(payload, ctx)
+        if path == "/api/meeting/voice-command":
+            return self.api_meeting_voice_command(payload, ctx)
         if path == "/api/scene/observe-image":
             return self.api_scene_observe_image(payload, ctx)
         if path == "/api/scene/device-observe":
             return self.api_scene_device_observe(payload, ctx)
         if path == "/api/scene/sensor-snapshot":
             return self.api_scene_sensor_snapshot(payload, ctx)
+        if path == "/api/scene/ambient-capture":
+            return self.api_scene_ambient_capture(payload, ctx)
         if path == "/api/scene/oriented-scan":
             return self.api_scene_oriented_scan(payload, ctx)
         if path == "/api/scene/tracking-run":
@@ -1392,6 +1469,70 @@ class WebConsoleServer:
         self.record_audit("file_read", "ok", str(preview.get("workspace_name") or workspace_name), {"preview_status": preview.get("status")}, ctx)
         return preview
 
+    def api_workspace_files(self, params: dict[str, list[str]] | None = None, ctx: RequestContext | None = None) -> dict[str, object]:
+        params = params or {}
+        query = (params.get("q", [""])[0] or "").lower()
+        type_filter = params.get("type", [""])[0].strip().lower()
+        page = max(1, safe_int(params.get("page", ["1"])[0], 1))
+        page_size = min(300, max(1, safe_int(params.get("page_size", ["100"])[0], 100)))
+        files = [self.shared_file_dto({"workspace_name": str(item.path.relative_to(self.runtime.workspace.root)), "name": item.name, "size_bytes": item.size_bytes, "sha256": item.sha256}) for item in self.runtime.workspace.list_files()]
+        if query:
+            files = [item for item in files if query in f"{item['name']} {item['relative_path']} {item['mime_type']}".lower()]
+        if type_filter:
+            files = [item for item in files if shared_file_matches_type(item, type_filter)]
+        total = len(files)
+        start = (page - 1) * page_size
+        if ctx:
+            self.record_audit("workspace.list", "ok", "workspace", {"total": total, "page": page, "page_size": page_size}, ctx)
+        return {
+            "workspace": str(self.runtime.workspace.root),
+            "shared_inbox": str(self.shared_space.inbox_dir),
+            "items": files[start : start + page_size],
+            "files": files[start : start + page_size],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+
+    def api_workspace_preview(self, workspace_name: str, ctx: RequestContext) -> dict[str, object]:
+        if not workspace_name:
+            raise ApiError("missing_file", "Missing required query parameter: file", status=400)
+        safe = self.ensure_allowed_path(workspace_name, ctx, action="workspace_preview")
+        stat = safe.path.stat()
+        payload: dict[str, object] = {
+            "status": "binary",
+            "workspace_name": safe.workspace_name,
+            "name": safe.path.name,
+            "size_bytes": stat.st_size,
+            "download_only": True,
+        }
+        if safe.path.suffix.lower() in TEXT_PREVIEW_SUFFIXES:
+            raw = safe.path.read_bytes()[:200_000]
+            payload.update(
+                {
+                    "status": "ok",
+                    "text": raw.decode("utf-8", "replace"),
+                    "truncated": stat.st_size > 200_000,
+                }
+            )
+        elif is_text_workflow_path(safe.path):
+            try:
+                extracted = self.runtime.documents.extract_document_text(safe.workspace_name, max_chars=12000)
+                source = extracted.get("source") if isinstance(extracted.get("source"), dict) else {}
+                payload.update(
+                    {
+                        "status": "ok",
+                        "download_only": False,
+                        "text": str(extracted.get("text") or ""),
+                        "truncated": bool(source.get("truncated")),
+                        "document_text_backend": source.get("backend"),
+                    }
+                )
+            except DocumentExtractionError as exc:
+                payload.update({"status": exc.status, "text": str(exc), "document_text_backend": exc.backend})
+        self.record_audit("workspace.preview", status_to_audit(str(payload.get("status"))), safe.workspace_name, {"size_bytes": stat.st_size}, ctx)
+        return payload
+
     def api_shared_download(self, workspace_name: str, ctx: RequestContext) -> Path:
         if not workspace_name:
             raise ApiError("missing_file", "Missing required query parameter: file", status=400)
@@ -1408,6 +1549,20 @@ class WebConsoleServer:
             ctx=ctx,
         )
         return path
+
+    def api_workspace_file(self, workspace_name: str, ctx: RequestContext, *, action: str = "workspace.file") -> Path:
+        if not workspace_name:
+            raise ApiError("missing_file", "Missing required query parameter: file", status=400)
+        safe = self.ensure_allowed_path(workspace_name, ctx, action=action)
+        self.record_audit(action, "ok", safe.workspace_name, {"size_bytes": safe.path.stat().st_size}, ctx)
+        return safe.path
+
+    def api_scene_image(self, workspace_name: str, ctx: RequestContext) -> Path:
+        safe = self.ensure_allowed_path(workspace_name, ctx, action="scene_image")
+        if safe.path.suffix.lower() not in {".jpg", ".jpeg", ".png", ".webp", ".bmp"}:
+            raise ApiError("unsupported_scene_image", "Only image files can be displayed here.", status=400)
+        self.record_audit("scene_image", "ok", safe.workspace_name, {"size_bytes": safe.path.stat().st_size}, ctx)
+        return safe.path
 
     def api_shared_upload(self, content_type: str, body: bytes, ctx: RequestContext) -> dict[str, object]:
         if "multipart/form-data" not in content_type:
@@ -1490,6 +1645,9 @@ class WebConsoleServer:
             if isinstance(exc, DocumentExtractionError):
                 result = exc.as_payload(filename=safe.workspace_name)
                 result["adapter_status"] = document_adapter_status_from_runtime(self.runtime)
+                if exc.backend == "unsupported":
+                    result["status"] = "unsupported"
+                    result["message"] = "当前文件类型不支持文本分析，请打开或下载原文件查看。"
             else:
                 result = {"status": "backend_missing", "summary": "Workspace file could not be decoded as text.", "error": str(exc)}
             status = str(result.get("status") or "backend_missing")
@@ -1550,10 +1708,313 @@ class WebConsoleServer:
         self.record_audit("document_adapters.status", "ok", "document_adapters", adapters, ctx)
         return {"adapters": adapters}
 
+    def api_docmost_status(self, ctx: RequestContext) -> dict[str, object]:
+        status = self.runtime.docmost.status()
+        self.record_audit(
+            "docmost.status",
+            status_to_audit(str(status.get("status") or "unknown")),
+            "docmost",
+            {
+                "configured": status.get("configured"),
+                "url": status.get("url"),
+                "default_space": status.get("default_space"),
+            },
+            ctx,
+        )
+        return status
+
+    def api_docmost_sync_file(self, payload: dict[str, Any], ctx: RequestContext) -> dict[str, object]:
+        safe = self.ensure_allowed_path(require_file_path(payload), ctx, action="docmost_sync_file")
+        title = str(payload.get("title") or safe.path.stem).strip() or safe.path.stem
+        space = str(payload.get("space") or "").strip() or None
+        try:
+            content, source_kind, extraction = self.docmost_file_content(safe)
+            markdown = build_docmost_markdown(
+                title=title,
+                source_path=safe.workspace_name,
+                source_kind=source_kind,
+                content=content,
+            )
+            page = self.runtime.docmost.create_page(title=title, markdown=markdown, space=space)
+        except DocmostError as exc:
+            self.record_audit("docmost.sync_file", "blocked", safe.workspace_name, {"code": exc.code, **exc.details}, ctx)
+            raise ApiError(exc.code, str(exc), status=exc.status, details=exc.details) from exc
+        result = {
+            "status": "completed",
+            "provider": "docmost",
+            "source_file": safe.workspace_name,
+            "source_kind": source_kind,
+            "extraction": extraction,
+            "docmost_url": self.runtime.config.docmost_url,
+            "docmost_page_id": page.page_id,
+            "docmost_page_url": page.url,
+            "docmost_page_title": page.title,
+            "docmost_space_id": page.space_id,
+            "docmost_space_slug": page.space_slug,
+        }
+        task = self.create_task(
+            "同步到 Wiki",
+            "document",
+            "completed",
+            {"file_path": safe.workspace_name, "title": title, "space": space or self.runtime.config.docmost_default_space},
+            result,
+        )
+        result["task_id"] = task["task_id"]
+        self.record_audit(
+            "docmost.sync_file",
+            "ok",
+            safe.workspace_name,
+            {"task_id": task["task_id"], "page_id": page.page_id, "space": page.space_slug},
+            ctx,
+        )
+        return result
+
+    def docmost_file_content(self, safe: SafePath) -> tuple[str, str, dict[str, object]]:
+        suffix = safe.path.suffix.lower()
+        size = safe.path.stat().st_size
+        if suffix in TEXT_PREVIEW_SUFFIXES:
+            raw = safe.path.read_bytes()[:1_000_000]
+            text = raw.decode("utf-8", "replace")
+            return text, suffix.lstrip(".") or "text", {
+                "status": "ok",
+                "backend": "text_file",
+                "size_bytes": size,
+                "truncated": size > len(raw),
+            }
+        if is_text_workflow_path(safe.path):
+            workspace_root = self.runtime.config.workspace_dir.resolve()
+            if safe.path.resolve().is_relative_to(workspace_root):
+                try:
+                    extracted = self.runtime.documents.extract_document_text(safe.workspace_name, max_chars=160_000)
+                    source = extracted.get("source") if isinstance(extracted.get("source"), dict) else {}
+                    return str(extracted.get("text") or ""), suffix.lstrip(".") or "document", {
+                        "status": "ok",
+                        "backend": str(source.get("backend") or "document_text"),
+                        "size_bytes": size,
+                        "truncated": bool(source.get("truncated")),
+                    }
+                except DocumentExtractionError as exc:
+                    return "", suffix.lstrip(".") or "document", {
+                        "status": exc.status,
+                        "backend": exc.backend,
+                        "size_bytes": size,
+                        "message": str(exc),
+                    }
+        return "", suffix.lstrip(".") or "file", {
+            "status": "unsupported",
+            "backend": "metadata_only",
+            "size_bytes": size,
+            "message": "该文件类型没有可同步的文本内容。",
+        }
+
     def api_meeting_status(self, ctx: RequestContext) -> dict[str, object]:
         status = self.runtime.meeting.status()
         self.record_audit("meeting_status", "ok", "meeting_mode", status, ctx)
         return {"status": "ok", **status}
+
+    def api_meeting_voice_command(self, payload: dict[str, Any], ctx: RequestContext) -> dict[str, object]:
+        text = str(payload.get("text") or payload.get("message") or "").strip()
+        if not text:
+            raise ApiError("missing_text", "Missing meeting command text.", status=400)
+        command = parse_meeting_voice_command(text)
+        result = self.runtime.meeting_voice.handle_text(
+            text,
+            executor=lambda parsed, raw_text: self.execute_meeting_voice_command(parsed, raw_text, ctx),
+        )
+        if not bool(result.get("handled")):
+            result = {
+                **result,
+                "status": "not_handled",
+                "reply": "未识别为会议控制命令。",
+            }
+        self.record_audit(
+            "meeting_voice_command",
+            status_to_audit(str(result.get("status") or "blocked")),
+            command.label if command is not None else "not_handled",
+            {
+                "handled": result.get("handled"),
+                "command": result.get("command"),
+                "qwen_omni_called": False,
+                "ai_assistant_kept_online": True,
+            },
+            ctx,
+        )
+        return result
+
+    def execute_meeting_voice_command(
+        self,
+        command: MeetingVoiceCommand,
+        text: str,
+        ctx: RequestContext,
+    ) -> dict[str, object]:
+        try:
+            result = self._execute_meeting_voice_command(command, ctx)
+        except ApiError as exc:
+            result = {
+                "status": "blocked",
+                "reply": self.meeting_voice_error_reply(command, exc.message),
+                "command": command.as_dict(),
+                "error": {"code": exc.code, "message": exc.message, "details": exc.details},
+            }
+        except Exception as exc:
+            result = {
+                "status": "error",
+                "reply": self.meeting_voice_error_reply(command, str(exc)),
+                "command": command.as_dict(),
+                "error": str(exc)[:1000],
+            }
+        return {
+            "handled": True,
+            "text": text,
+            "command": command.as_dict(),
+            "ai_assistant_kept_online": True,
+            "qwen_omni_called": False,
+            **result,
+        }
+
+    def _execute_meeting_voice_command(self, command: MeetingVoiceCommand, ctx: RequestContext) -> dict[str, object]:
+        action = command.action
+        if action == "meeting_status":
+            meeting_status = self.api_meeting_status(ctx)
+            realtime_status = self.api_meeting_realtime_status(None, ctx)
+            local_status = self.api_meeting_local_realtime_status(ctx)
+            return self.meeting_voice_result(command, self.meeting_status_reply(meeting_status, realtime_status, local_status), {
+                "meeting_mode": meeting_status,
+                "realtime": realtime_status,
+                "local_realtime": local_status,
+            })
+        if action == "meeting_provider_status":
+            provider = self.api_meeting_provider_status(ctx)
+            return self.meeting_voice_result(command, self.meeting_provider_reply(provider), {"provider": provider})
+        if action == "start_realtime_meeting":
+            active = self.tingwu.active_meeting_id()
+            if active:
+                realtime_status = self.api_meeting_realtime_status(active, ctx)
+                return self.meeting_voice_result(command, f"实时会议已经在运行：{active}。AI 助手仍保持在线。", {"realtime": realtime_status}, status="already_running")
+            title = command.title or default_meeting_title()
+            if title == "LeLamp 实时会议":
+                title = default_meeting_title()
+            realtime = self.api_meeting_realtime_start(
+                {"title": title, "participants": list(command.participants) or ["Unknown"], "max_seconds": command.max_seconds},
+                ctx,
+            )
+            reply = f"已开始实时会议记录：{realtime.get('meeting_id') or title}。AI 助手仍保持在线。"
+            return self.meeting_voice_result(command, reply, {"realtime": realtime}, status="running")
+        if action == "stop_realtime_meeting":
+            active = self.tingwu.active_meeting_id()
+            if not active:
+                realtime_status = self.api_meeting_realtime_status(None, ctx)
+                return self.meeting_voice_result(command, "现在没有正在运行的实时会议。AI 助手仍保持在线。", {"realtime": realtime_status}, status="not_running")
+            realtime = self.api_meeting_realtime_stop({"meeting_id": active, "run_followup": True}, ctx)
+            reply = f"已停止实时会议记录：{active}。AI 助手仍保持在线。"
+            return self.meeting_voice_result(command, reply, {"realtime": realtime}, status=str(realtime.get("status") or "completed"))
+        if action == "fetch_realtime_minutes":
+            meeting_id = self.latest_realtime_meeting_id()
+            if not meeting_id:
+                return self.meeting_voice_result(command, "还没有可拉取纪要的实时会议。", {"realtime": {"status": "idle"}}, status="blocked")
+            realtime = self.api_meeting_realtime_fetch_minutes({"meeting_id": meeting_id, "run_followup": True}, ctx)
+            return self.meeting_voice_result(command, "已拉取听悟 AI 会议结果。", {"realtime": realtime}, status=str(realtime.get("status") or "completed"))
+        if action == "enable_meeting_mode":
+            title = command.title or default_meeting_title("LeLamp 本地会议")
+            meeting = self.api_meeting_mode_enable({"title": title, "participants": list(command.participants) or ["Unknown"]}, ctx)
+            return self.meeting_voice_result(command, command.reply, {"meeting_mode": meeting})
+        if action == "disable_meeting_mode":
+            meeting = self.api_meeting_mode_disable(ctx)
+            return self.meeting_voice_result(command, command.reply, {"meeting_mode": meeting})
+        if action == "local_realtime_status":
+            local = self.api_meeting_local_realtime_status(ctx)
+            return self.meeting_voice_result(command, self.local_realtime_reply(local), {"local_realtime": local})
+        if action == "export_transcript":
+            exported = self.api_meeting_local_realtime_export({"source": "meeting_voice_command"}, ctx)
+            return self.meeting_voice_result(command, f"已导出会议转写：{exported.get('workspace_name') or exported.get('transcript_path') or ''}", {"export": exported})
+        if action == "generate_minutes":
+            minutes = self.api_meeting_minutes({"title": command.title or ""}, ctx)
+            return self.meeting_voice_result(command, f"已生成会议纪要：{minutes.get('path') or ''}", {"minutes": minutes})
+        if action == "extract_decisions":
+            decisions = self.api_meeting_extract_step("decisions", {"title": command.title or ""}, ctx)
+            return self.meeting_voice_result(command, f"已提取会议决策：{len(decisions.get('items') or [])} 条。", {"decisions": decisions})
+        if action == "extract_action_items":
+            action_items = self.api_meeting_extract_step("action_items", {"title": command.title or ""}, ctx)
+            return self.meeting_voice_result(command, f"已提取会议待办：{len(action_items.get('items') or [])} 条。", {"action_items": action_items})
+        if action == "create_reminders":
+            reminders = self.api_meeting_reminders({"title": command.title or ""}, ctx)
+            return self.meeting_voice_result(command, f"已生成会议提醒草稿：{reminders.get('count') or 0} 条。", {"reminders": reminders})
+        if action == "create_followup_package":
+            followup = self.api_meeting_followup({"title": command.title or "", "render_projection": True, "create_reminders": True}, ctx)
+            return self.meeting_voice_result(command, "已生成会议跟进包。", {"followup": followup}, status=str(followup.get("status") or "completed"))
+        if action == "render_projection_confirmation":
+            projection = self.api_meeting_projection_confirmation({"title": command.title or "会议确认"}, ctx)
+            return self.meeting_voice_result(command, "已生成会议投影确认页。", {"projection_confirmation": projection})
+        if action == "export_package":
+            followup = self.api_meeting_export_package({"title": command.title or "", "authorized": True, "render_projection": True, "create_reminders": True}, ctx)
+            return self.meeting_voice_result(command, "已导出会议材料包。", {"export_package": followup}, status=str(followup.get("status") or "completed"))
+        return self.meeting_voice_result(command, "这个会议命令暂时不支持。", {}, status="unsupported")
+
+    def meeting_voice_result(
+        self,
+        command: MeetingVoiceCommand,
+        reply: str,
+        result: dict[str, object],
+        *,
+        status: str = "completed",
+    ) -> dict[str, object]:
+        return {
+            "status": status,
+            "reply": reply,
+            "command": command.as_dict(),
+            "meeting_result": result,
+        }
+
+    def meeting_voice_error_reply(self, command: MeetingVoiceCommand, message: str) -> str:
+        if command.action == "start_realtime_meeting":
+            return f"实时会议没有启动：{message}。AI 助手仍保持在线。"
+        if command.action == "stop_realtime_meeting":
+            return f"实时会议没有停止：{message}。AI 助手仍保持在线。"
+        if command.action == "fetch_realtime_minutes":
+            return f"会议 AI 结果没有生成：{message}"
+        return f"会议命令没有完成：{message}"
+
+    def meeting_status_reply(
+        self,
+        meeting_status: dict[str, object],
+        realtime_status: dict[str, object],
+        local_status: dict[str, object],
+    ) -> str:
+        realtime_value = str(realtime_status.get("status") or "idle")
+        meeting_mode = "开启" if bool(meeting_status.get("meeting_mode_enabled")) else "关闭"
+        turns = safe_int(local_status.get("turn_count"), 0)
+        active = str(realtime_status.get("meeting_id") or realtime_status.get("active_meeting_id") or "")
+        if realtime_value in {"starting", "running", "stopping", "finalizing"}:
+            return f"实时会议正在运行：{active or realtime_value}；本地会议模式{meeting_mode}，已有 {turns} 条转写。AI 助手仍保持在线。"
+        return f"当前没有运行中的实时会议；本地会议模式{meeting_mode}，已有 {turns} 条转写。AI 助手仍保持在线。"
+
+    def meeting_provider_reply(self, provider: dict[str, object]) -> str:
+        primary = provider.get("providers") if isinstance(provider.get("providers"), dict) else {}
+        tingwu = primary.get("tongyi_tingwu") if isinstance(primary.get("tongyi_tingwu"), dict) else {}
+        status = str(provider.get("status") or tingwu.get("status") or "unknown")
+        active = str(tingwu.get("active_meeting_id") or "")
+        suffix = f"，当前会议 {active}" if active else ""
+        return f"听悟会议服务状态：{status}{suffix}。"
+
+    def local_realtime_reply(self, local: dict[str, object]) -> str:
+        enabled = "开启" if bool(local.get("meeting_mode_enabled")) else "关闭"
+        turns = safe_int(local.get("turn_count"), 0)
+        speakers = local.get("speaker_counts") if isinstance(local.get("speaker_counts"), dict) else {}
+        return f"本地会议模式{enabled}，已有 {turns} 条转写，识别到 {len(speakers)} 个说话人标签。"
+
+    def latest_realtime_meeting_id(self) -> str:
+        active = self.tingwu.active_meeting_id()
+        if active:
+            return active
+        for task in self.load_tasks(limit=80):
+            task_input = task.get("input") if isinstance(task.get("input"), dict) else {}
+            output = task.get("output") if isinstance(task.get("output"), dict) else {}
+            if str(task_input.get("provider") or output.get("provider") or "") != "tongyi_tingwu":
+                continue
+            meeting_id = str(task_input.get("meeting_id") or output.get("meeting_id") or "").strip()
+            if meeting_id:
+                return meeting_id
+        return ""
 
     def api_meeting_local_realtime_status(self, ctx: RequestContext) -> dict[str, object]:
         summary = self.runtime.meeting.realtime_summary()
@@ -1690,7 +2151,11 @@ class WebConsoleServer:
         safe = self.ensure_allowed_path(require_file_path(payload), ctx, action="meeting_import_transcript")
         title = str(payload.get("title") or Path(safe.workspace_name).stem)
         participants = list_string(payload.get("participants")) or ["Unknown"]
-        parsed = self.runtime.meeting.parse_transcript_file(safe.workspace_name, title, participants)
+        try:
+            parsed = self.runtime.meeting.parse_transcript_file(safe.workspace_name, title, participants)
+        except ValueError as exc:
+            self.record_audit("meeting_import_transcript", "blocked", safe.workspace_name, {"reason": str(exc)}, ctx)
+            raise ApiError("invalid_meeting_transcript", str(exc), status=400) from exc
         job = self.create_meeting_job(title, safe.workspace_name, "import_transcript", "completed", parsed)
         self.record_audit("meeting_import_transcript", "ok", safe.workspace_name, {"job_id": job["job_id"], **parsed}, ctx)
         return job
@@ -1730,11 +2195,15 @@ class WebConsoleServer:
         if transcript:
             safe = self.ensure_allowed_path(str(transcript), ctx, action=action)
             title = str(payload.get("title") or Path(safe.workspace_name).stem)
-            self.runtime.meeting.parse_transcript_file(
-                safe.workspace_name,
-                title,
-                list_string(payload.get("participants")) or ["Unknown"],
-            )
+            try:
+                self.runtime.meeting.parse_transcript_file(
+                    safe.workspace_name,
+                    title,
+                    list_string(payload.get("participants")) or ["Unknown"],
+                )
+            except ValueError as exc:
+                self.record_audit(action, "blocked", safe.workspace_name, {"reason": str(exc)}, ctx)
+                raise ApiError("invalid_meeting_transcript", str(exc), status=400) from exc
             return safe.workspace_name, title
         status = self.runtime.meeting.status()
         title = str(payload.get("title") or status.get("active_title") or "Meeting")
@@ -2330,7 +2799,7 @@ class WebConsoleServer:
                 title,
                 transcript_workspace,
                 "decisions",
-                "waiting_confirmation",
+                "completed",
                 decisions_output,
                 meeting_id=meeting_id,
                 provider="tongyi_tingwu",
@@ -2890,11 +3359,11 @@ class WebConsoleServer:
                 "items": items,
                 "source_minutes_path": minutes.get("path"),
                 "generated_at": now_iso(),
-                "confirmation_required": True,
+                "confirmation_required": False,
             },
             action=f"meeting.{step_name}_extract",
         )
-        status = "waiting_confirmation" if step_name == "decisions" else "completed"
+        status = "completed"
         result = {
             "status": status,
             "step": step_name,
@@ -2903,10 +3372,10 @@ class WebConsoleServer:
             "path": str(output_path),
             "source_minutes_path": minutes.get("path"),
             "confirmation": {
-                "required": True,
-                "summary": "请用户确认后再作为正式会议结论使用。",
+                "required": False,
+                "summary": "内容已生成。",
             },
-            "message": "已从 transcript 生成可审查步骤输出，等待用户确认。" if status == "waiting_confirmation" else "已生成可审查步骤输出。",
+            "message": "已从 transcript 生成步骤输出。",
         }
         task = self.create_task(
             f"会议工作流：{title}",
@@ -3754,8 +4223,26 @@ class WebConsoleServer:
             except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError):
                 status_payload = {}
         browser_preview_url = self.camera_stream_browser_url(ctx)
+        stream_status = str(status_payload.get("status") or "")
+        frame_index = safe_int(status_payload.get("frame_index"), 0)
+        stream_error = str(status_payload.get("error") or "")
+        if not running:
+            public_status = "stopped"
+            message = "Camera preview is stopped."
+        elif stream_status == "error":
+            public_status = "error"
+            message = stream_error or "Camera preview service is running, but the camera did not open."
+        elif stream_status == "camera_read_failed":
+            public_status = "error"
+            message = "Camera preview service is running, but no camera frames are available."
+        elif frame_index <= 0 and stream_status in {"", "starting"}:
+            public_status = "starting"
+            message = "Camera preview is starting; waiting for the first frame."
+        else:
+            public_status = "online"
+            message = "Camera preview is available in the browser."
         payload = {
-            "status": "online" if running else "stopped",
+            "status": public_status,
             "preview_url": self._camera_stream_url,
             "snapshot_url": f"{self._camera_stream_url}snapshot.jpg",
             "stream_url": f"{self._camera_stream_url}stream.mjpg",
@@ -3766,7 +4253,7 @@ class WebConsoleServer:
             "started_at": self._camera_stream_started_at,
             "always_on": running,
             "details": status_payload,
-            "message": "Camera preview is available in the browser." if running else "Camera preview is stopped.",
+            "message": message,
         }
         if ctx:
             self.record_audit("camera_stream.status", "ok", "camera_stream", {"running": running}, ctx)
@@ -3818,23 +4305,51 @@ class WebConsoleServer:
         backend: str = "auto",
         ctx: RequestContext | None = None,
     ) -> dict[str, object]:
+        backend = backend if backend in {"auto", "face", "hog", "yolo"} else "auto"
+        resolved_camera_index = self.resolve_camera_index(camera_index)
         with self._camera_stream_lock:
             existing = self._camera_stream_process
             if existing is not None and existing.poll() is None:
-                return {
-                    **self.api_camera_stream_status(ctx),
-                    "status": "starting" if not self.camera_stream_healthcheck() else "online",
-                    "message": "Camera preview is already starting.",
-                }
-            if self.camera_stream_running():
-                return {
-                    **self.api_camera_stream_status(ctx),
-                    "status": "online",
-                    "message": "Camera preview is already running.",
-                }
+                if self._camera_stream_camera_index != resolved_camera_index:
+                    existing.terminate()
+                    try:
+                        existing.wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        existing.kill()
+                    self._camera_stream_process = None
+                    self._camera_stream_started_at = None
+                    self._camera_stream_camera_index = None
+                else:
+                    current = self.api_camera_stream_status(ctx)
+                    if str(current.get("status")) == "error":
+                        existing.terminate()
+                        try:
+                            existing.wait(timeout=3)
+                        except subprocess.TimeoutExpired:
+                            existing.kill()
+                        self._camera_stream_process = None
+                        self._camera_stream_started_at = None
+                        self._camera_stream_camera_index = None
+                    else:
+                        return {
+                            **current,
+                            "status": "starting" if not self.camera_stream_healthcheck() else current.get("status", "online"),
+                            "message": "Camera preview is already starting.",
+                        }
+            elif self.camera_stream_running():
+                current = self.api_camera_stream_status(ctx)
+                if safe_int(current.get("camera_index"), -1) != resolved_camera_index:
+                    self.stop_external_camera_stream_processes()
+                    self._camera_stream_started_at = None
+                    self._camera_stream_camera_index = None
+                else:
+                    return {
+                        **current,
+                        "status": "online",
+                        "message": "Camera preview is already running.",
+                    }
 
             backend = backend if backend in {"auto", "face", "hog", "yolo"} else "auto"
-            resolved_camera_index = self.resolve_camera_index(camera_index)
             command = [
                 sys.executable,
                 "-u",
@@ -3877,14 +4392,14 @@ class WebConsoleServer:
 
         deadline = time.monotonic() + 4
         while time.monotonic() < deadline:
-            if self.camera_stream_healthcheck():
+            current = self.api_camera_stream_status(ctx)
+            if str(current.get("status")) in {"online", "error", "failed", "blocked", "unavailable"}:
                 break
             time.sleep(0.2)
-        return {
-            **self.api_camera_stream_status(ctx),
-            "status": "online" if self.camera_stream_healthcheck() else "starting",
-            "message": "Camera preview started; open it in the browser.",
-        }
+        current = self.api_camera_stream_status(ctx)
+        if str(current.get("status")) == "online":
+            current["message"] = "Camera preview started; open it in the browser."
+        return current
 
     def stop_camera_stream_service(self, ctx: RequestContext | None = None) -> dict[str, object]:
         with self._camera_stream_lock:
@@ -3976,6 +4491,13 @@ class WebConsoleServer:
             finally:
                 camera.release()
         return device_indices[0] if device_indices else None
+
+    def scene_camera_rotation_degrees(self, camera_index: int, payload: dict[str, Any]) -> int:
+        if "rotation_degrees" in payload:
+            return 180 if safe_int(payload.get("rotation_degrees"), 0) % 360 == 180 else 0
+        if camera_index == 0 and payload_bool(payload.get("cam0_rotate_180"), default=True):
+            return 180
+        return 0
 
     def projection_preview_running(self) -> bool:
         with self._projection_preview_lock:
@@ -4117,6 +4639,178 @@ class WebConsoleServer:
         )
         return result
 
+    def api_lelamp_motor_control_read(self, ctx: RequestContext) -> dict[str, object]:
+        port = str(self.runtime.config.hardware_port or "/dev/ttyACM0")
+        pose = self.read_lelamp_pose(port=port)
+        saved_poses = {
+            "default": self.read_saved_lelamp_pose("lelamp_center"),
+            "scan": self.read_saved_lelamp_pose("lelamp_scan"),
+            "projection": self.read_saved_lelamp_pose("lelamp_projection"),
+        }
+        result = {
+            "status": "completed" if pose.get("pose_readable") else "failed",
+            "hardware_enabled": self.runtime.config.enable_hardware,
+            "port": port,
+            "lamp_id": self.runtime.config.lamp_id,
+            "motors": list(LELAMP_CONTROL_MOTORS),
+            "pose": round_motor_map(pose.get("pose", {}), LELAMP_CONTROL_MOTORS),
+            "saved_poses": saved_poses,
+            "pose_readable": bool(pose.get("pose_readable")),
+            "error": pose.get("error", ""),
+            "duration_ms": pose.get("duration_ms"),
+        }
+        self.record_audit("lelamp_motor_read", status_to_audit(str(result["status"])), port, {"pose_readable": result["pose_readable"]}, ctx)
+        return result
+
+    def api_lelamp_motor_control_move(self, payload: dict[str, Any], ctx: RequestContext) -> dict[str, object]:
+        if not self.runtime.config.enable_hardware:
+            raise ApiError("hardware_disabled", "OPENCLAW_ENABLE_HARDWARE is not enabled.", status=409)
+        port = str(self.runtime.config.hardware_port or "/dev/ttyACM0")
+        mode = str(payload.get("mode") or "target")
+        max_delta = clamp_number(optional_float(payload.get("max_delta")), default=35.0, low=0.1, high=90.0)
+        hold_seconds = clamp_number(optional_float(payload.get("hold_seconds")), default=0.35, low=0.0, high=3.0)
+        requested = payload.get("target") if isinstance(payload.get("target"), dict) else {}
+        deltas = payload.get("deltas") if isinstance(payload.get("deltas"), dict) else {}
+        motor = str(payload.get("motor") or "").strip()
+        delta_value = optional_float(payload.get("delta"))
+
+        try:
+            from lelamp.person_tracker import read_current_pose
+
+            bus = self.connect_lelamp_motor_bus(port=port, max_step=None)
+            try:
+                current = read_current_pose(bus)
+                target: dict[str, float] = {}
+                if mode == "delta":
+                    for name, value in deltas.items():
+                        if str(name) in LELAMP_CONTROL_MOTORS:
+                            delta = clamp_number(optional_float(value), default=0.0, low=-max_delta, high=max_delta)
+                            target[str(name)] = float(current[str(name)]) + delta
+                    if motor in LELAMP_CONTROL_MOTORS and delta_value is not None:
+                        target[motor] = float(current[motor]) + clamp_number(delta_value, default=0.0, low=-max_delta, high=max_delta)
+                else:
+                    for name, value in requested.items():
+                        if str(name) in LELAMP_CONTROL_MOTORS:
+                            numeric = optional_float(value)
+                            if numeric is not None:
+                                target[str(name)] = float(numeric)
+                if not target:
+                    raise ApiError("empty_motor_target", "No valid motor target was provided.", status=400)
+                ordered_target = {motor: float(target[motor]) for motor in ordered_motor_names(target)}
+                move_step = clamp_number(optional_float(payload.get("max_step")), default=6.0, low=0.5, high=12.0)
+                move_iterations = safe_int(payload.get("max_iterations"), 0)
+                actual, movement_trace = self.move_lelamp_pose_in_steps(
+                    bus,
+                    ordered_target,
+                    motors=ordered_motor_names(ordered_target),
+                    max_step=move_step,
+                    step_seconds=0.12,
+                    tolerance=0.5,
+                    max_iterations=max(1, min(240, move_iterations)) if move_iterations > 0 else None,
+                )
+                time.sleep(hold_seconds)
+                actual = read_current_pose(bus)
+            finally:
+                bus.disconnect(disable_torque=False)
+        except Exception as exc:
+            result = {
+                "status": "failed",
+                "port": port,
+                "lamp_id": self.runtime.config.lamp_id,
+                "error": str(exc)[:1000],
+            }
+            self.record_audit("lelamp_motor_move", "error", port, result, ctx)
+            return result
+
+        errors = {name: round(abs(float(ordered_target[name]) - float(actual[name])), 4) for name in ordered_target}
+        max_error = max(errors.values()) if errors else 0
+        result = {
+            "status": "completed" if max_error <= 0.5 else "timeout",
+            "port": port,
+            "lamp_id": self.runtime.config.lamp_id,
+            "mode": mode,
+            "motors": list(LELAMP_CONTROL_MOTORS),
+            "before": round_motor_map(current, LELAMP_CONTROL_MOTORS),
+            "target": round_motor_map(ordered_target),
+            "actual": round_motor_map(actual, LELAMP_CONTROL_MOTORS),
+            "errors": errors,
+            "max_error": round(max_error, 4),
+            "write_order": ordered_motor_names(ordered_target),
+            "movement_trace": movement_trace,
+        }
+        self.record_audit("lelamp_motor_move", status_to_audit(str(result["status"])), port, {"mode": mode, "target": ordered_target, "write_order": result["write_order"], "max_error": result["max_error"]}, ctx)
+        return result
+
+    def api_lelamp_motor_control_save_pose(self, payload: dict[str, Any], ctx: RequestContext) -> dict[str, object]:
+        pose_key = str(payload.get("pose") or "").strip().lower()
+        pose_names = {
+            "default": "lelamp_center",
+            "scan": "lelamp_scan",
+            "projection": "lelamp_projection",
+        }
+        pose_name = pose_names.get(pose_key)
+        if not pose_name:
+            raise ApiError("invalid_pose", "Pose must be default, scan, or projection.", status=400)
+        motors_payload = payload.get("motors")
+        if not isinstance(motors_payload, dict):
+            raise ApiError("missing_motors", "Missing motors payload.", status=400)
+
+        motors: dict[str, float] = {}
+        missing: list[str] = []
+        invalid: list[str] = []
+        for motor in LELAMP_CONTROL_MOTORS:
+            if motor not in motors_payload:
+                missing.append(motor)
+                continue
+            numeric = optional_float(motors_payload.get(motor))
+            if numeric is None or not math.isfinite(numeric):
+                invalid.append(motor)
+                continue
+            motors[motor] = round(float(numeric), 4)
+        if missing or invalid:
+            raise ApiError(
+                "invalid_pose_motors",
+                "Pose must include numeric values for all five motors.",
+                status=400,
+                details={"missing": missing, "invalid": invalid},
+            )
+
+        port = str(self.runtime.config.hardware_port or "/dev/ttyACM0")
+        pose_path = self.runtime.config.workspace_dir / ".poses" / f"{safe_filename(pose_name)}.json"
+        pose_payload = {
+            "name": pose_name,
+            "id": self.runtime.config.lamp_id,
+            "port": port,
+            "created_at": time.time(),
+            "motors": motors,
+        }
+        atomic_write_json(pose_path, pose_payload)
+        motion_config = load_motion_config(self.motion_config_path())
+        pose_labels = {
+            "default": "默认位置",
+            "scan": "扫描位置",
+            "projection": "投影位置",
+        }
+        set_named_pose(motion_config, pose_key, motors, label=pose_labels.get(pose_key, pose_key))
+        motion_config_path = save_motion_config(motion_config, self.motion_config_path())
+        saved_poses = {
+            "default": self.read_saved_lelamp_pose("lelamp_center"),
+            "scan": self.read_saved_lelamp_pose("lelamp_scan"),
+            "projection": self.read_saved_lelamp_pose("lelamp_projection"),
+        }
+        result = {
+            "status": "completed",
+            "port": port,
+            "lamp_id": self.runtime.config.lamp_id,
+            "pose": motors,
+            "saved_poses": saved_poses,
+            "pose_file": str(pose_path),
+            "motion_config_file": str(motion_config_path),
+            "motors": list(LELAMP_CONTROL_MOTORS),
+        }
+        self.record_audit("lelamp_motor_save_pose", "ok", pose_key, {"pose_name": pose_name, "motors": motors}, ctx)
+        return result
+
     def lelamp_motion_preflight(self, *, read_pose: bool) -> dict[str, object]:
         port = str(self.runtime.config.hardware_port or "/dev/ttyACM0")
         candidates = serial_device_candidates()
@@ -4174,7 +4868,7 @@ class WebConsoleServer:
             return {
                 "status": "completed",
                 "pose_readable": True,
-                "pose": pose,
+                "pose": round_motor_map(pose, LELAMP_CONTROL_MOTORS),
                 "duration_ms": round((time.monotonic() - started) * 1000, 1),
             }
         except Exception as exc:
@@ -4185,6 +4879,29 @@ class WebConsoleServer:
                 "error": str(exc)[:1000],
                 "duration_ms": round((time.monotonic() - started) * 1000, 1),
             }
+
+    def read_saved_lelamp_pose(self, pose_name: str) -> dict[str, float]:
+        config_pose_names = {
+            "lelamp_center": "default",
+            "lelamp_scan": "scan",
+            "lelamp_projection": "projection",
+        }
+        configured = get_named_pose(load_motion_config(self.motion_config_path()), config_pose_names.get(pose_name, pose_name))
+        if configured:
+            return round_motor_map(configured, LELAMP_CONTROL_MOTORS)
+        pose_path = self.runtime.config.workspace_dir / ".poses" / f"{safe_filename(pose_name)}.json"
+        try:
+            payload = json.loads(pose_path.read_text(encoding="utf-8"))
+            motors = payload.get("motors", payload) if isinstance(payload, dict) else {}
+            return round_motor_map(motors, LELAMP_CONTROL_MOTORS)
+        except Exception:
+            return {}
+
+    def motion_config_path(self) -> Path:
+        configured = os.getenv("LELAMP_MOTION_CONFIG", "").strip()
+        if configured:
+            return Path(configured).expanduser()
+        return self.runtime.config.workspace_dir / "lelamp_motion_config.json"
 
     def connect_lelamp_motor_bus(self, *, port: str, max_step: float | None):
         from lelamp.person_tracker import connect_motor_bus
@@ -4206,25 +4923,40 @@ class WebConsoleServer:
         from lelamp.person_tracker import read_current_pose
 
         current_pose = read_current_pose(bus)
+        motors = ordered_motor_names({motor: target_pose[motor] for motor in motors if motor in target_pose})
+        if not motors:
+            return current_pose, []
+        try:
+            bus.enable_torque(list(motors), num_retry=5)
+        except Exception:
+            pass
         max_delta = max((abs(float(target_pose[motor]) - float(current_pose[motor])) for motor in motors), default=0.0)
-        iteration_limit = max(1, safe_int(max_iterations, 0)) if max_iterations is not None else max(1, min(10, math.ceil(max_delta / max(0.1, max_step)) + 4))
+        iteration_limit = max(1, safe_int(max_iterations, 0)) if max_iterations is not None else max(1, min(240, math.ceil(max_delta / max(0.1, max_step)) + 12))
+        effective_step_seconds = max(step_seconds, min(0.35, max(0.08, max_step * 0.03)))
+        command_pose = {motor: float(current_pose[motor]) for motor in motors}
+        command_lead_limit = max(max_step * 5.0, max_step + tolerance)
         trace: list[dict[str, object]] = []
 
         for step_index in range(iteration_limit):
             if all(abs(float(target_pose[motor]) - float(current_pose[motor])) <= tolerance for motor in motors):
                 break
-            next_pose = dict(current_pose)
+            next_pose: dict[str, float] = {}
             for motor in motors:
-                current_value = float(current_pose[motor])
+                current_value = float(command_pose[motor])
+                actual_value = float(current_pose[motor])
                 target_value = float(target_pose[motor])
                 delta = target_value - current_value
                 if abs(delta) <= max_step:
                     next_pose[motor] = target_value
                 else:
                     next_pose[motor] = current_value + (max_step if delta > 0 else -max_step)
+                lead = next_pose[motor] - actual_value
+                if abs(lead) > command_lead_limit:
+                    next_pose[motor] = actual_value + (command_lead_limit if lead > 0 else -command_lead_limit)
 
-            bus.sync_write("Goal_Position", next_pose)
-            time.sleep(step_seconds)
+            write_goal_position_ordered(bus, next_pose)
+            command_pose.update(next_pose)
+            time.sleep(effective_step_seconds)
             current_pose = read_current_pose(bus)
             trace.append(
                 {
@@ -4234,6 +4966,33 @@ class WebConsoleServer:
                     "actual": {motor: round(float(current_pose[motor]), 3) for motor in motors},
                 }
             )
+
+        for verification_round in range(2):
+            pending = [
+                motor
+                for motor in motors
+                if abs(float(target_pose[motor]) - float(current_pose[motor])) > tolerance
+            ]
+            if not pending:
+                break
+            for motor in pending:
+                current_value = float(current_pose[motor])
+                target_value = float(target_pose[motor])
+                delta = target_value - current_value
+                command_value = target_value if abs(delta) <= max_step else current_value + (max_step if delta > 0 else -max_step)
+                write_goal_position_ordered(bus, {motor: command_value})
+                time.sleep(effective_step_seconds)
+                current_pose = read_current_pose(bus)
+                trace.append(
+                    {
+                        "step": len(trace) + 1,
+                        "verification_round": verification_round + 1,
+                        "motor": motor,
+                        "target": {motor: round(target_value, 3)},
+                        "commanded": {motor: round(command_value, 3)},
+                        "actual": {name: round(float(current_pose[name]), 3) for name in motors},
+                    }
+                )
 
         return current_pose, trace
 
@@ -4252,6 +5011,75 @@ class WebConsoleServer:
         }
         self.record_audit("lelamp_state", status, state, payload, ctx)
         return payload
+
+    def api_lelamp_voice_command(self, payload: dict[str, Any], ctx: RequestContext) -> dict[str, object]:
+        text = str(payload.get("text") or payload.get("message") or "").strip()
+        if not text:
+            raise ApiError("missing_text", "Missing LeLamp command text.", status=400)
+
+        command = parse_lamp_voice_command(text)
+        audit_status = "blocked"
+        with self._lelamp_voice_lock:
+            if command is not None and command.action in {"set_rgb", "play", "default_state", "scan_pdf", "project", "relax_motors"} and self.runtime.config.enable_hardware:
+                self.runtime.lelamp_voice.set_hardware(self.lelamp_voice_hardware())
+            elif self._lelamp_voice_hardware is not None:
+                self.runtime.lelamp_voice.set_hardware(self._lelamp_voice_hardware)
+            if command is not None and command.action == "scan_pdf":
+                self.runtime.lelamp_voice.set_scan_services(
+                    camera_observer=self.runtime.camera_observer,
+                    scanning=self.runtime.scanning,
+                    workspace=self.runtime.workspace,
+                    projection=self.runtime.projection,
+                    preview_snapshot=self.capture_from_camera_preview_snapshot,
+                )
+            elif command is not None and command.action == "project":
+                self.runtime.lelamp_voice.set_scan_services(
+                    workspace=self.runtime.workspace,
+                    projection=self.runtime.projection,
+                )
+
+            result = self.runtime.lelamp_voice.handle_text(text)
+
+        if not bool(result.get("handled")):
+            result = {
+                **result,
+                "status": "not_handled",
+                "reply": "未识别为台灯控制命令。",
+            }
+        audit_status = status_to_audit(str(result.get("status") or audit_status))
+        self.record_audit(
+            "lelamp.voice_text_command",
+            audit_status,
+            text,
+            {
+                "handled": result.get("handled"),
+                "status": result.get("status"),
+                "command": result.get("command"),
+            },
+            ctx,
+        )
+        return result
+
+    def lelamp_voice_hardware(self) -> LampHardware:
+        if self._lelamp_voice_hardware is None:
+            hardware = LampHardware(
+                enabled=self.runtime.config.enable_hardware,
+                port=self.runtime.config.hardware_port,
+                lamp_id=self.runtime.config.lamp_id,
+                audit=self.runtime.audit,
+                rgb_enabled=self.runtime.config.enable_rgb,
+            )
+            hardware.__enter__()
+            self._lelamp_voice_hardware = hardware
+        return self._lelamp_voice_hardware
+
+    def stop_lelamp_voice_hardware(self) -> None:
+        with self._lelamp_voice_lock:
+            hardware = self._lelamp_voice_hardware
+            self._lelamp_voice_hardware = None
+            self.runtime.lelamp_voice.set_hardware(None)
+            if hardware is not None:
+                hardware.__exit__(None, None, None)
 
     def api_scene_recent(self, limit: int, ctx: RequestContext) -> dict[str, object]:
         events = self.runtime.scene.get_recent_events(limit=max(1, min(100, limit)))
@@ -4460,9 +5288,10 @@ class WebConsoleServer:
     def api_scene_device_observe(self, payload: dict[str, Any], ctx: RequestContext) -> dict[str, object]:
         title = str(payload.get("title") or "desk_scene_observation")
         camera_index = self.resolve_camera_index(payload.get("camera_index"))
+        rotation_degrees = self.scene_camera_rotation_degrees(camera_index, payload)
         timeout_seconds = max(3, min(20, safe_int(payload.get("timeout_seconds"), 12)))
         executor = ThreadPoolExecutor(max_workers=1)
-        future = executor.submit(self.runtime.camera_observer.capture_frame, camera_index=camera_index)
+        future = executor.submit(self.runtime.camera_observer.capture_frame, camera_index=camera_index, rotation_degrees=rotation_degrees)
         try:
             capture = future.result(timeout=timeout_seconds)
         except FutureTimeoutError:
@@ -4472,12 +5301,13 @@ class WebConsoleServer:
                 "message": f"设备相机拍照超过 {timeout_seconds} 秒未返回。",
                 "camera_index": camera_index,
                 "timeout_seconds": timeout_seconds,
+                "rotation_degrees": rotation_degrees,
             }
         finally:
             executor.shutdown(wait=False, cancel_futures=True)
 
         if str(capture.get("status") or "") != "captured":
-            fallback_capture = self.capture_from_camera_preview_snapshot(title, camera_index=camera_index)
+            fallback_capture = self.capture_from_camera_preview_snapshot(title, camera_index=camera_index, rotation_degrees=rotation_degrees)
             if str(fallback_capture.get("status") or "") != "captured":
                 result = {
                     "status": "unavailable",
@@ -4489,6 +5319,7 @@ class WebConsoleServer:
                     "suggestions": [],
                     "capture": capture,
                     "fallback_capture": fallback_capture,
+                    "rotation_degrees": rotation_degrees,
                     "message": "设备相机没有拍到图片，请检查摄像头连接或改用上传图片。",
                 }
                 self.record_audit("scene_device_observe", "blocked", f"camera:{camera_index}", result, ctx)
@@ -4520,6 +5351,7 @@ class WebConsoleServer:
             "events": analysis.get("events", []),
             "capture": capture,
             "camera_index": camera_index,
+            "rotation_degrees": rotation_degrees,
             "title": title,
         }
         result["suggestions"] = self.runtime.scene.workflow_suggestions(
@@ -4640,6 +5472,232 @@ class WebConsoleServer:
             ctx,
         )
         return {"task_id": task["task_id"], **result}
+
+    def api_scene_ambient_capture(self, payload: dict[str, Any], ctx: RequestContext) -> dict[str, object]:
+        """Explicitly capture both cameras and server microphone audio, then transcribe it."""
+        seconds = max(1, min(10, safe_int(payload.get("mic_seconds"), 4)))
+        include_cameras = payload_bool(payload.get("include_cameras"), default=True)
+        include_mic = payload_bool(payload.get("include_mic"), default=True)
+        camera_indices = payload.get("camera_indices")
+        if not isinstance(camera_indices, list):
+            camera_indices = [0, 1]
+        indices: list[int] = []
+        for item in camera_indices:
+            numeric = safe_int(item, -1)
+            if numeric >= 0 and numeric not in indices:
+                indices.append(numeric)
+            if len(indices) >= 2:
+                break
+        if not indices:
+            indices = [0, 1]
+
+        cameras: list[dict[str, object]] = []
+        if include_cameras:
+            for index in indices:
+                rotation_degrees = self.scene_camera_rotation_degrees(index, payload)
+                camera = self.capture_scene_camera_snapshot(
+                    f"ambient_camera_{index}",
+                    {
+                        **payload,
+                        "camera_index": index,
+                        "rotation_degrees": rotation_degrees,
+                    },
+                    ctx,
+                )
+                workspace_name = str(camera.get("workspace_name") or "")
+                cameras.append(
+                    {
+                        "camera_index": index,
+                        "rotation_degrees": camera.get("rotation_degrees", rotation_degrees),
+                        "cam0_rotate_180": bool(camera.get("cam0_rotate_180", rotation_degrees == 180 if index == 0 else False)),
+                        "status": camera.get("status", "unavailable"),
+                        "source": camera.get("source", ""),
+                        "workspace_name": workspace_name,
+                        "image_url": self.console_scene_image_url(workspace_name) if workspace_name else "",
+                        "path": camera.get("image_path") or camera.get("path") or "",
+                        "events": camera.get("events", []),
+                        "message": camera.get("message", ""),
+                        "analysis": camera.get("analysis", {}),
+                    }
+                )
+
+        audio = self.capture_scene_stereo_transcript(seconds=seconds) if include_mic else {"status": "skipped", "transcripts": []}
+        camera_ok = any(str(item.get("status") or "") in {"captured", "completed", "ok"} for item in cameras)
+        audio_ok = str(audio.get("status") or "") == "completed"
+        if not include_cameras and not include_mic:
+            status = "skipped"
+        else:
+            status = "completed" if camera_ok or audio_ok else "unavailable"
+        result = {
+            "status": status,
+            "source": "explicit_ambient_capture",
+            "include_cameras": include_cameras,
+            "include_mic": include_mic,
+            "camera_count": len(cameras),
+            "cameras": cameras,
+            "microphone": audio,
+            "transcripts": audio.get("transcripts", []),
+            "safety": [
+                "仅在用户点击后采集，不后台常开监听。",
+                "双摄检查和语音转文字可独立触发，未请求的输入不会采集。",
+            ],
+        }
+        task_title = "双摄像头检查" if include_cameras and not include_mic else "左右声道转文字" if include_mic and not include_cameras else "双摄像头与左右声道转文字"
+        task = self.create_task(task_title, "scene", status, {"seconds": seconds, "camera_indices": indices, "include_cameras": include_cameras, "include_mic": include_mic}, result)
+        self.record_audit(
+            "scene_ambient_capture",
+            status_to_audit(status),
+            "scene_ambient_capture",
+            {"task_id": task["task_id"], "camera_count": len(cameras), "transcript_count": len(result["transcripts"]), "include_cameras": include_cameras, "include_mic": include_mic},
+            ctx,
+        )
+        return {"task_id": task["task_id"], **result}
+
+    def console_scene_image_url(self, workspace_name: str) -> str:
+        query = urllib.parse.urlencode({"token": self.token, "file": workspace_name})
+        return f"/api/scene/image?{query}"
+
+    def capture_scene_stereo_transcript(self, *, seconds: int) -> dict[str, object]:
+        output = self.runtime.workspace.path_for_new_file("scene_ambient_audio.wav")
+        capture = self.record_stereo_microphone_sample(seconds=seconds, output=output)
+        if str(capture.get("status") or "") != "completed":
+            return {**capture, "transcripts": []}
+
+        channels = split_wave_channels(output)
+        transcripts: list[dict[str, object]] = []
+        for channel in channels:
+            channel_path = channel.get("path")
+            if not isinstance(channel_path, Path):
+                continue
+            transcript_item = {
+                "channel": channel.get("channel"),
+                "label": channel.get("label"),
+                "status": "pending",
+                "text": "",
+                "audio_workspace_name": workspace_name_for_path(self.runtime.workspace.root, channel_path),
+                "rms": channel.get("rms"),
+                "peak": channel.get("peak"),
+                "duration_seconds": channel.get("duration_seconds"),
+            }
+            if safe_int(channel.get("rms"), 0) < 40 and safe_int(channel.get("peak"), 0) < 250:
+                transcript_item["status"] = "silence"
+                transcript_item["message"] = "未检测到明显声音。"
+            else:
+                try:
+                    text = self.transcribe_scene_audio(channel_path)
+                    transcript_item["text"] = text
+                    transcript_item["status"] = "completed" if text else "empty"
+                except Exception as exc:
+                    transcript_item["status"] = "backend_missing"
+                    transcript_item["message"] = str(exc)[:500]
+            transcripts.append(transcript_item)
+
+        return {
+            **capture,
+            "audio_workspace_name": workspace_name_for_path(self.runtime.workspace.root, output),
+            "channels": [
+                {key: value for key, value in channel.items() if key != "path"}
+                for channel in channels
+            ],
+            "transcripts": transcripts,
+        }
+
+    def record_stereo_microphone_sample(self, *, seconds: int, output: Path) -> dict[str, object]:
+        if shutil.which("arecord") is None:
+            return {"status": "backend_missing", "message": "arecord not found", "output_path": str(output)}
+        try:
+            from .hardware_probe import resolve_capture_device, trim, wave_metrics
+
+            selected_device = resolve_capture_device(self.runtime.config.mic_device)
+        except Exception as exc:
+            return {
+                "status": "unavailable",
+                "message": str(exc),
+                "configured_device": self.runtime.config.mic_device,
+                "selected_device": "",
+                "output_path": str(output),
+            }
+
+        seconds = max(1, min(10, int(seconds)))
+        output.parent.mkdir(parents=True, exist_ok=True)
+        command = [
+            "arecord",
+            "-D",
+            selected_device,
+            "-f",
+            "S16_LE",
+            "-c",
+            "2",
+            "-r",
+            str(self.runtime.config.mic_rate),
+            "-d",
+            str(seconds),
+            str(output),
+        ]
+        result = subprocess.run(command, capture_output=True, text=True, check=False, timeout=seconds + 8)
+        if result.returncode != 0:
+            fallback_command = [
+                "arecord",
+                "-D",
+                selected_device,
+                "-f",
+                "S16_LE",
+                "-c",
+                "1",
+                "-r",
+                str(self.runtime.config.mic_rate),
+                "-d",
+                str(seconds),
+                str(output),
+            ]
+            fallback = subprocess.run(fallback_command, capture_output=True, text=True, check=False, timeout=seconds + 8)
+            if fallback.returncode != 0:
+                return {
+                    "status": "unavailable",
+                    "command": command,
+                    "fallback_command": fallback_command,
+                    "output_path": str(output),
+                    "configured_device": self.runtime.config.mic_device,
+                    "selected_device": selected_device,
+                    "stderr": trim(result.stderr),
+                    "fallback_stderr": trim(fallback.stderr),
+                    "stdout": trim(result.stdout),
+                }
+            command = fallback_command
+
+        metrics = wave_metrics(output)
+        with wave.open(str(output), "rb") as stream:
+            channel_count = stream.getnchannels()
+            sample_rate = stream.getframerate()
+        return {
+            "status": "completed",
+            "command": command,
+            "output_path": str(output),
+            "configured_device": self.runtime.config.mic_device,
+            "selected_device": selected_device,
+            "channel_count": channel_count,
+            "sample_rate": sample_rate,
+            **metrics,
+        }
+
+    def transcribe_scene_audio(self, audio_path: Path) -> str:
+        config = self.runtime.config
+        provider = config.asr_provider
+        if provider == "dashscope":
+            return DashScopeASR(
+                api_key=config.dashscope_api_key,
+                model=config.dashscope_asr_model,
+                sample_rate=config.mic_rate,
+            ).transcribe(audio_path, language_hints=["zh", "en"])
+        if provider == "groq":
+            return GroqASR(api_key=config.groq_api_key).transcribe(audio_path, model=config.asr_model, language="zh")
+        if provider == "openai":
+            return OpenAIAudioAPI(api_key=config.openai_api_key, base_url=config.openai_base_url).transcribe(
+                audio_path,
+                model=config.asr_model,
+                language="zh",
+            )
+        raise RuntimeError(f"Unsupported ASR provider: {provider}")
 
     def api_scene_oriented_scan(self, payload: dict[str, Any], ctx: RequestContext) -> dict[str, object]:
         authorized = bool(payload.get("authorized"))
@@ -4767,6 +5825,7 @@ class WebConsoleServer:
                     "include_mic": include_mic,
                     "include_hardware": True,
                     "mic_seconds": 1,
+                    "cam0_rotate_180": payload.get("cam0_rotate_180", True),
                     "lux": payload.get("lux"),
                     "people_count": payload.get("people_count"),
                     "presence": payload.get("presence"),
@@ -5063,11 +6122,12 @@ class WebConsoleServer:
 
     def capture_scene_camera_snapshot(self, title: str, payload: dict[str, Any], ctx: RequestContext) -> dict[str, object]:
         camera_index = self.resolve_camera_index(payload.get("camera_index"))
+        rotation_degrees = self.scene_camera_rotation_degrees(camera_index, payload)
         timeout_seconds = max(3, min(12, safe_int(payload.get("timeout_seconds"), 6)))
-        capture = self.capture_from_camera_preview_snapshot(title, camera_index=camera_index)
+        capture = self.capture_from_camera_preview_snapshot(title, camera_index=camera_index, rotation_degrees=rotation_degrees)
         if str(capture.get("status") or "") != "captured":
             executor = ThreadPoolExecutor(max_workers=1)
-            future = executor.submit(self.runtime.camera_observer.capture_frame, camera_index=camera_index)
+            future = executor.submit(self.runtime.camera_observer.capture_frame, camera_index=camera_index, rotation_degrees=rotation_degrees)
             try:
                 capture = future.result(timeout=timeout_seconds)
             except FutureTimeoutError:
@@ -5077,6 +6137,7 @@ class WebConsoleServer:
                     "message": f"设备相机拍照超过 {timeout_seconds} 秒未返回。",
                     "camera_index": camera_index,
                     "timeout_seconds": timeout_seconds,
+                    "rotation_degrees": rotation_degrees,
                 }
             finally:
                 executor.shutdown(wait=False, cancel_futures=True)
@@ -5085,6 +6146,8 @@ class WebConsoleServer:
                 "status": "unavailable",
                 "source": "device_camera_capture",
                 "camera_index": camera_index,
+                "rotation_degrees": rotation_degrees,
+                "cam0_rotate_180": camera_index == 0 and rotation_degrees == 180,
                 "capture": capture,
                 "analysis": {},
                 "events": [],
@@ -5100,6 +6163,8 @@ class WebConsoleServer:
                 "status": "blocked",
                 "source": "device_camera_capture",
                 "camera_index": camera_index,
+                "rotation_degrees": rotation_degrees,
+                "cam0_rotate_180": camera_index == 0 and rotation_degrees == 180,
                 "capture": capture,
                 "analysis": {},
                 "events": [],
@@ -5112,6 +6177,8 @@ class WebConsoleServer:
             "status": "completed" if analysis.get("status") == "ok" else normalize_task_status(str(analysis.get("status") or "backend_missing")),
             "source": str(capture.get("source") or "device_camera_capture"),
             "camera_index": camera_index,
+            "rotation_degrees": rotation_degrees,
+            "cam0_rotate_180": camera_index == 0 and rotation_degrees == 180,
             "image_path": str(capture_path),
             "workspace_name": workspace_name,
             "capture": capture,
@@ -5142,7 +6209,16 @@ class WebConsoleServer:
         result["purpose"] = "scene_activity_only_no_transcription"
         return result
 
-    def capture_from_camera_preview_snapshot(self, title: str, *, camera_index: int) -> dict[str, object]:
+    def capture_from_camera_preview_snapshot(self, title: str, *, camera_index: int, rotation_degrees: int = 0) -> dict[str, object]:
+        if self._camera_stream_camera_index is not None and self._camera_stream_camera_index != camera_index:
+            return {
+                "status": "unavailable",
+                "source": "camera_preview_snapshot",
+                "camera_index": camera_index,
+                "stream_camera_index": self._camera_stream_camera_index,
+                "rotation_degrees": rotation_degrees,
+                "message": "相机预览当前不是请求的相机，改用设备相机直接拍照。",
+            }
         preview_url = os.getenv("LELAMP_CAMERA_STREAM_URL", "http://127.0.0.1:8788").rstrip("/")
         snapshot_url = f"{preview_url}/snapshot.jpg"
         try:
@@ -5156,6 +6232,7 @@ class WebConsoleServer:
                 "source": "camera_preview_snapshot",
                 "snapshot_url": snapshot_url,
                 "camera_index": camera_index,
+                "rotation_degrees": rotation_degrees,
                 "message": f"相机预览快照不可用：{type(exc).__name__}",
             }
         if not data or "image/jpeg" not in content_type.lower():
@@ -5166,17 +6243,21 @@ class WebConsoleServer:
                 "camera_index": camera_index,
                 "content_type": content_type,
                 "bytes": len(data),
+                "rotation_degrees": rotation_degrees,
                 "message": "相机预览没有返回 JPEG 画面。",
             }
         path = self.runtime.workspace.path_for_new_file(safe_filename(title, default="camera_preview", suffix="_snapshot.jpg"))
         atomic_write_bytes(path, data)
+        rotation = self.runtime.camera_observer.rotate_image_file(path, rotation_degrees=rotation_degrees)
         return {
             "status": "captured",
             "source": "camera_preview_snapshot",
             "path": str(path),
-            "bytes": len(data),
+            "bytes": path.stat().st_size if path.exists() else len(data),
             "snapshot_url": snapshot_url,
             "camera_index": camera_index,
+            "rotation_degrees": rotation_degrees,
+            "rotation": rotation,
             "command": "camera_stream.snapshot",
         }
 
@@ -5856,6 +6937,83 @@ class WebConsoleServer:
             {"message_id": message_id, "input_type": input_type, "text_length": len(text), "page": page},
             ctx,
         )
+
+        meeting_command = parse_meeting_voice_command(text)
+        if meeting_command is not None:
+            meeting_result = self.api_meeting_voice_command({"text": text}, ctx)
+            reply = str(meeting_result.get("reply") or "已执行会议命令。")
+            status = str(meeting_result.get("status") or "completed")
+            self.record_audit(
+                "assistant_meeting_local_command",
+                status_to_audit(status),
+                meeting_command.label,
+                {
+                    "message_id": message_id,
+                    "command": meeting_result.get("command"),
+                    "handled": meeting_result.get("handled"),
+                    "qwen_omni_called": False,
+                    "ai_assistant_kept_online": True,
+                },
+                ctx,
+            )
+            return {
+                "session_id": session_id,
+                "message_id": message_id,
+                "route": {
+                    "kind": "meeting_control",
+                    "intent": str(meeting_command.action),
+                    "requires_openclaw": False,
+                    "requires_confirmation": False,
+                    "skill": "meeting_voice",
+                },
+                "assistant_message": {
+                    "text": reply,
+                    "streamed": False,
+                    "speak": False,
+                    "provider": "meeting_local_skill",
+                    "provider_status": status,
+                    "speech": {"status": "skipped", "reason": "local_meeting_command"},
+                },
+                "meeting_result": meeting_result,
+            }
+
+        lamp_command = parse_lamp_voice_command(text)
+        if lamp_command is not None:
+            lamp_result = self.api_lelamp_voice_command({"text": text}, ctx)
+            reply = str(lamp_result.get("reply") or "已执行台灯命令。")
+            status = str(lamp_result.get("status") or "completed")
+            self.record_audit(
+                "assistant_lamp_local_command",
+                status_to_audit(status),
+                lamp_command.label,
+                {
+                    "message_id": message_id,
+                    "command": lamp_result.get("command"),
+                    "handled": lamp_result.get("handled"),
+                    "qwen_omni_called": False,
+                },
+                ctx,
+            )
+            return {
+                "session_id": session_id,
+                "message_id": message_id,
+                "route": {
+                    "kind": "lamp_control",
+                    "intent": str(lamp_command.action),
+                    "requires_openclaw": False,
+                    "requires_confirmation": False,
+                    "skill": "lelamp_voice",
+                },
+                "assistant_message": {
+                    "text": reply,
+                    "streamed": False,
+                    "speak": False,
+                    "provider": "lelamp_local_skill",
+                    "provider_status": status,
+                    "speech": {"status": "skipped", "reason": "local_servo_command"},
+                },
+                "lamp_result": lamp_result,
+            }
 
         if route_kind == "chat":
             chat = self.qwen_omni_chat(text, ctx, message_id)
@@ -6742,17 +7900,31 @@ class WebConsoleServer:
         value = urllib.parse.unquote(str(input_path or "")).strip().replace("\\", "/")
         if not value:
             raise ApiError("missing_file_path", "Missing file_path.", status=400)
+        try:
+            workspace_path = self.runtime.workspace.resolve_workspace_file(value)
+            return SafePath(workspace_path, str(workspace_path.relative_to(self.runtime.workspace.root)))
+        except Exception:
+            pass
         candidates: list[Path] = []
         if Path(value).is_absolute():
             candidates.append(Path(value).expanduser().resolve())
         else:
             candidates.append((self.runtime.config.workspace_dir / value).resolve())
+            candidates.append((self.runtime.config.workspace_dir.parent / value).resolve())
             if not value.startswith("shared_inbox/"):
                 candidates.append((self.shared_space.inbox_dir / value).resolve())
-        roots = tuple(path.resolve() for path in self.runtime.config.allowed_roots)
+        projection_root = self.runtime.config.projection_dir.resolve()
+        roots = tuple(dict.fromkeys([*(path.resolve() for path in self.runtime.config.allowed_roots), projection_root]))
         for candidate in candidates:
             if candidate.is_file() and any(candidate.is_relative_to(root) for root in roots):
-                return SafePath(candidate, str(candidate.relative_to(self.runtime.config.workspace_dir)))
+                workspace_root = self.runtime.config.workspace_dir.resolve()
+                if candidate.is_relative_to(workspace_root):
+                    workspace_name = str(candidate.relative_to(workspace_root))
+                elif candidate.is_relative_to(projection_root):
+                    workspace_name = str(Path(projection_root.name) / candidate.relative_to(projection_root))
+                else:
+                    workspace_name = str(candidate)
+                return SafePath(candidate, workspace_name)
         target = redact_target(value)
         self.record_audit(action, "blocked", target, {"reason": "outside allowed roots or file missing"}, ctx)
         raise ApiError("blocked", "File access blocked by workspace/shared_inbox/allowed roots policy.", status=403, details={"target": target})
@@ -6797,7 +7969,7 @@ class WebConsoleServer:
             "title": clean_title,
             "type": task_type,
             "status": normalize_task_status(status),
-            "progress": 1.0 if normalize_task_status(status) in {"completed", "blocked", "failed"} else 0.5,
+            "progress": 1.0 if normalize_task_status(status) in {"completed", "blocked", "failed", "unsupported"} else 0.5,
             "created_at": now,
             "updated_at": now,
             "input": sanitize_event_payload(input_payload),
@@ -7079,7 +8251,7 @@ class WebConsoleServer:
             "source_minutes_path": minutes_result.get("path") or minutes_result.get("tingwu_minutes_path"),
             "generated_at": now_iso(),
             "provider": "tongyi_tingwu",
-            "confirmation_required": step_name == "decisions",
+            "confirmation_required": False,
         }
         if output_dir:
             output_path = self.write_meeting_output_json(
@@ -7096,7 +8268,7 @@ class WebConsoleServer:
                 payload,
                 action=f"meeting.{step_name}_extract",
             )
-        status = "waiting_confirmation" if step_name == "decisions" else "completed"
+        status = "completed"
         return {
             "status": status,
             "step": step_name,
@@ -7105,10 +8277,10 @@ class WebConsoleServer:
             "path": str(output_path),
             "source_minutes_path": minutes_result.get("path") or minutes_result.get("tingwu_minutes_path"),
             "confirmation": {
-                "required": step_name == "decisions",
-                "summary": "请用户确认后再作为正式会议结论使用。" if step_name == "decisions" else "行动项已生成，可继续创建提醒。",
+                "required": False,
+                "summary": "内容已生成。",
             },
-            "message": "已从实时会议生成可审查步骤输出。",
+            "message": "已从实时会议生成步骤输出。",
         }
 
     def meeting_output_dir(self, output_dir_value: str, *, meeting_id: str = "", ctx: RequestContext | None = None) -> Path | None:
@@ -7457,13 +8629,30 @@ class WebConsoleServer:
         output: dict[str, object],
         input_payload: dict[str, object],
     ) -> dict[str, object]:
+        display_status = status
+        if (
+            step_name == "realtime_capture"
+            and status == "failed"
+            and (
+                output.get("transcript_path")
+                or output.get("audio_path")
+                or safe_float(output.get("audio_seconds"), 0.0) > 0
+            )
+        ):
+            display_status = "completed"
+        if (
+            step_name == "minutes"
+            and status == "failed"
+            and str(output.get("openclaw_status") or "") == "completed"
+        ):
+            display_status = "partial"
         return {
             "name": step_name,
-            "status": status,
+            "status": display_status,
             "input_file": str(input_payload.get("transcript") or ""),
             "system_understanding": meeting_step_understanding(step_name, output),
             "ai_result": meeting_step_result(step_name, output),
-            "confirmation": output.get("confirmation") if isinstance(output.get("confirmation"), dict) else {"required": status == "waiting_confirmation"},
+            "confirmation": output.get("confirmation") if isinstance(output.get("confirmation"), dict) else {"required": False},
             "output_path": first_output_path(output),
             "output": compact_meeting_step_output(step_name, output),
             "task_id": str(task.get("task_id") or ""),
@@ -7516,16 +8705,17 @@ class WebConsoleServer:
             step_name = str(input_payload.get("step") or "minutes")
             status = str(task.get("status") or "completed")
             step = self.meeting_step_from_task(task, step_name, status, output, input_payload)
+            step_status = str(step.get("status") or status)
             steps = group["steps"] if isinstance(group.get("steps"), dict) else {}
             existing = steps.get(step_name)
             if not isinstance(existing, dict) or str(step.get("updated_at")) >= str(existing.get("updated_at") or ""):
                 steps[step_name] = step
             group["steps"] = steps
             group["updated_at"] = max(str(group.get("updated_at") or ""), str(task.get("updated_at") or ""))
-            if status in {"failed", "blocked"}:
+            if step_status == "partial" and str(group.get("status") or "") == "completed":
+                group["status"] = "partial"
+            elif status in {"failed", "blocked"} and step_status != "partial":
                 group["status"] = status
-            elif status == "waiting_confirmation" and group.get("status") == "completed":
-                group["status"] = "waiting_confirmation"
             if not str(group.get("title") or "").strip() or str(group.get("title")).startswith("会议工作流："):
                 group["title"] = title
 
@@ -8030,6 +9220,22 @@ def safe_int(value: Any, default: int) -> int:
         return default
 
 
+def payload_bool(value: Any, *, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "y", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "n", "off"}:
+            return False
+    return default
+
+
 def optional_float(value: Any) -> float | None:
     if value is None or value == "":
         return None
@@ -8043,6 +9249,77 @@ def clamp_number(value: float | None, *, default: float, low: float, high: float
     if value is None:
         value = default
     return max(low, min(high, float(value)))
+
+
+def round_motor_map(values: Any, keys: Iterable[str] | None = None) -> dict[str, float]:
+    if not isinstance(values, dict):
+        return {}
+    source_keys = list(keys) if keys is not None else list(values.keys())
+    rounded: dict[str, float] = {}
+    for key in source_keys:
+        if key not in values:
+            continue
+        numeric = optional_float(values.get(key))
+        if numeric is not None and math.isfinite(numeric):
+            rounded[str(key)] = round(float(numeric), 4)
+    return rounded
+
+
+def split_wave_channels(path: Path) -> list[dict[str, object]]:
+    import audioop
+
+    with wave.open(str(path), "rb") as source:
+        channel_count = source.getnchannels()
+        sample_width = source.getsampwidth()
+        sample_rate = source.getframerate()
+        frame_count = source.getnframes()
+        frames = source.readframes(frame_count)
+    duration = frame_count / sample_rate if sample_rate else 0
+    if channel_count <= 1:
+        return [
+            {
+                "channel": "mono",
+                "label": "单声道",
+                "path": path,
+                "rms": audioop.rms(frames, sample_width) if frames else 0,
+                "peak": audioop.max(frames, sample_width) if frames else 0,
+                "duration_seconds": round(duration, 2),
+            }
+        ]
+
+    channels: list[dict[str, object]] = []
+    labels = ["左声道", "右声道"]
+    for index in range(min(channel_count, 2)):
+        channel_frames = audioop.tomono(
+            frames,
+            sample_width,
+            1.0 if index == 0 else 0.0,
+            0.0 if index == 0 else 1.0,
+        )
+        channel_path = path.with_name(f"{path.stem}_{'left' if index == 0 else 'right'}{path.suffix}")
+        with wave.open(str(channel_path), "wb") as target:
+            target.setnchannels(1)
+            target.setsampwidth(sample_width)
+            target.setframerate(sample_rate)
+            target.writeframes(channel_frames)
+        channels.append(
+            {
+                "channel": "left" if index == 0 else "right",
+                "label": labels[index],
+                "path": channel_path,
+                "rms": audioop.rms(channel_frames, sample_width) if channel_frames else 0,
+                "peak": audioop.max(channel_frames, sample_width) if channel_frames else 0,
+                "duration_seconds": round(duration, 2),
+            }
+        )
+    return channels
+
+
+def workspace_name_for_path(workspace_root: Path, path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(workspace_root.resolve()))
+    except ValueError:
+        return ""
 
 
 def scan_offsets_from_payload(value: Any, yaw_delta: float) -> list[float]:
@@ -8310,6 +9587,7 @@ def normalize_task_status(status: str) -> str:
         "available": "completed",
         "adapter_ready": "blocked",
         "backend_missing": "blocked",
+        "unsupported": "unsupported",
         "unavailable": "blocked",
         "waiting_confirmation": "waiting_confirmation",
         "needs_confirmation": "waiting_confirmation",
@@ -8465,7 +9743,7 @@ def status_to_audit(status: str) -> str:
         return "ok"
     if status in {"waiting_confirmation", "needs_confirmation"}:
         return "blocked"
-    if status in {"adapter_ready", "backend_missing", "unavailable", "blocked", "error"}:
+    if status in {"adapter_ready", "backend_missing", "unsupported", "unavailable", "blocked", "error"}:
         return status
     return "ok" if status == "ok" else status
 
@@ -8788,7 +10066,7 @@ def meeting_step_understanding(step_name: str, output: dict[str, object]) -> str
     if step_name == "minutes":
         return f"已汇总 {output.get('turn_count', 0)} 条发言，识别决策 {len(list_string(output.get('decisions')))} 条、行动项 {len(list_string(output.get('action_items')))} 条"
     if step_name == "decisions":
-        return f"从会议内容提取 {len(list_string(output.get('decisions') or output.get('items')))} 条决策，等待用户确认"
+        return f"从会议内容提取 {len(list_string(output.get('decisions') or output.get('items')))} 条决策"
     if step_name == "action_items":
         return f"从会议内容提取 {len(list_string(output.get('action_items') or output.get('items')))} 条行动项"
     if step_name == "followup":
@@ -9269,6 +10547,7 @@ def render_console_page(token: str) -> str:
               <button class="primary" id="analyzeDoc">分析</button>
               <button class="secondary" id="summarizeDoc">摘要</button>
               <button class="secondary" id="registerScan">登记扫描</button>
+              <button class="secondary" id="correctScanCorners">四角矫正</button>
               <button class="secondary" id="runScanOcr">OCR</button>
               <button class="secondary" id="summarizeOcr">OCR 摘要</button>
               <button class="secondary" id="parseBusinessCard">名片解析</button>
@@ -9386,8 +10665,30 @@ def render_console_page(token: str) -> str:
     function escapeHtml(value) {{
       return String(value ?? '').replace(/[&<>"']/g, ch => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[ch]));
     }}
+    function workspaceDownloadLink(workspaceName, label) {{
+      if (!workspaceName) return '';
+      const encoded = encodeURIComponent(workspaceName);
+      const download = `/api/shared/download?token=${{encodeURIComponent(TOKEN)}}&file=${{encoded}}`;
+      return `<a class="link-button" href="${{download}}" target="_blank" rel="noreferrer">${{escapeHtml(label || workspaceName)}}</a>`;
+    }}
+    function renderScanArtifacts(value) {{
+      const enhancement = value && value.enhancement ? value.enhancement : value;
+      if (!enhancement || typeof enhancement !== 'object') return '';
+      const cornerPreview = enhancement.corner_preview_workspace_name || (enhancement.auto_corner_correction || {{}}).preview_workspace_name;
+      const colorScan = enhancement.color_workspace_name || enhancement.enhanced_workspace_name;
+      const ocrScan = enhancement.ocr_workspace_name;
+      const links = [
+        workspaceDownloadLink(cornerPreview, '查看四角预览'),
+        workspaceDownloadLink(colorScan, '查看矫正扫描图'),
+        workspaceDownloadLink(ocrScan, '查看 OCR 增强图')
+      ].filter(Boolean).join('');
+      if (!links) return '';
+      const status = enhancement.auto_corner_correction || {{}};
+      return `<div class="file-actions" style="margin-bottom: 12px;">${{links}}</div>
+        <p>四角状态：${{escapeHtml(status.status || '')}} 置信度：${{escapeHtml(status.confidence ?? '')}}</p>`;
+    }}
     function renderJson(value) {{ return escapeHtml(JSON.stringify(value, null, 2)); }}
-    function setOutput(id, value) {{ document.getElementById(id).innerHTML = renderJson(value); }}
+    function setOutput(id, value) {{ document.getElementById(id).innerHTML = renderScanArtifacts(value) + renderJson(value); }}
     function statusClass(value) {{ return 'status-' + String(value || 'ok').replace(/[^a-zA-Z0-9_-]/g, '_'); }}
 
     async function refreshAll() {{
@@ -9716,6 +11017,11 @@ def render_console_page(token: str) -> str:
     }});
     document.getElementById('registerScan').addEventListener('click', async () => {{
       const result = await api('/api/scan/register', {{ method: 'POST', headers: jsonHeaders, body: JSON.stringify({{ filename: documentFile.value, document_type: scanType.value }}) }});
+      setOutput('documentOutput', result);
+      await refreshAll();
+    }});
+    document.getElementById('correctScanCorners').addEventListener('click', async () => {{
+      const result = await api('/api/scan/enhance', {{ method: 'POST', headers: jsonHeaders, body: JSON.stringify({{ filename: documentFile.value }}) }});
       setOutput('documentOutput', result);
       await refreshAll();
     }});

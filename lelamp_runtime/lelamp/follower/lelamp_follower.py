@@ -29,6 +29,7 @@ from lerobot.motors.feetech import (
 
 from lerobot.robots import Robot
 from lerobot.robots.utils import ensure_safe_goal_position
+from lelamp.motor_control import write_goal_position_ordered
 from .config_lelamp_follower import LeLampFollowerConfig
 
 logger = logging.getLogger(__name__)
@@ -216,8 +217,8 @@ class LeLampFollower(Robot):
             goal_pos = ensure_safe_goal_position(goal_present_pos, self.config.max_relative_target)
 
 
-        # Send goal position to the arm
-        self.bus.sync_write("Goal_Position", goal_pos)
+        # Send one motor at a time in the physical 1-5 order.
+        write_goal_position_ordered(self.bus, goal_pos)
         return {f"{motor}.pos": val for motor, val in goal_pos.items()}
 
     def disconnect(self):

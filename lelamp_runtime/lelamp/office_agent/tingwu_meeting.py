@@ -43,6 +43,8 @@ MAX_TINGWU_EVENT_TEXT_CHARS = 2000
 MAX_TINGWU_EVENT_LIST_ITEMS = 20
 MAX_TINGWU_PROVIDER_EVENTS = 200
 MAX_TINGWU_AI_EVENTS = 50
+MAX_TINGWU_RAW_EVENTS = 80
+MAX_TINGWU_AGENT_EVENTS = 80
 MAX_TINGWU_HTTP_OPERATIONS = 50
 MAX_TINGWU_ARTIFACT_REDIRECTS = 3
 TINGWU_WORKSPACE_LOCK_NAME = ".tingwu_realtime.lock"
@@ -798,6 +800,7 @@ class TingwuRealtimeCallback(TingWuRealtimeCallback):
         if isinstance(ai_events, list):
             ai_events.append(compact_event_payload(result))
             del ai_events[:-MAX_TINGWU_AI_EVENTS]
+        self.provider._record_agent_event(self.meeting_id, result)
         self._dispatch(result)
 
     def on_stopped(self) -> None:
@@ -902,6 +905,12 @@ class TingwuMeetingProvider:
             "transcription_model": self.config.tingwu_transcription_model,
             "analysis_model": self.config.tingwu_analysis_model,
             "language_hints": self.language_hints(),
+            "translation_enabled": self.config.tingwu_translation_enabled,
+            "translation_target_lang": self.translation_target_langs(),
+            "phrase_id_configured": bool(self.config.tingwu_phrase_id.strip()),
+            "hot_words_configured": bool(self.hot_words()),
+            "audio_channel_mode": self.config.tingwu_audio_channel_mode,
+            "capabilities": self.capabilities_status(),
             "active_meeting_id": self.active_meeting_id(),
             "active_count": len([item for item in self._sessions.values() if item.status in ACTIVE_MEETING_STATUSES]),
             "message": message,
@@ -987,21 +996,59 @@ class TingwuMeetingProvider:
     def language_hints(self) -> list[str]:
         return [item.strip() for item in self.config.tingwu_language_hints.split(",") if item.strip()]
 
-    def task_analysis_parameters(self) -> dict[str, Any]:
+    def translation_target_langs(self) -> list[str]:
+        return [item.strip() for item in self.config.tingwu_translation_target_lang.split(",") if item.strip()]
+
+    def hot_words(self) -> list[str]:
+        return [item.strip() for item in re.split(r"[,，\n]", self.config.tingwu_hot_words) if item.strip()]
+
+    def capabilities_status(self) -> dict[str, bool]:
+        custom_prompt_enabled = bool(self.config.tingwu_custom_prompt_enabled and self.config.tingwu_custom_prompt.strip())
         return {
-            "model": self.config.tingwu_analysis_model,
-            "keyInformationEnabled": True,
-            "actionsEnabled": True,
-            "fullSummaryEnabled": True,
-            "fullSummaryFormat": "markdown",
-            "conversationalEnabled": True,
-            "questionsAnsweringEnabled": True,
-            "mindMapEnabled": False,
-            "pptExtractionEnabled": False,
-            "autoChaptersEnabled": True,
-            "textPolishEnabled": False,
-            "customPromptEnabled": False,
+            "realtime_transcription": True,
+            "speaker_diarization": True,
+            "translation": bool(self.config.tingwu_translation_enabled and self.translation_target_langs()),
+            "phrase_hot_words": bool(self.config.tingwu_phrase_id.strip()),
+            "local_hot_words_note": bool(self.hot_words()),
+            "key_information": self.config.tingwu_key_information_enabled,
+            "actions": self.config.tingwu_actions_enabled,
+            "full_summary": self.config.tingwu_full_summary_enabled,
+            "conversational_summary": self.config.tingwu_conversational_enabled,
+            "questions_answering": self.config.tingwu_questions_answering_enabled,
+            "mind_map": self.config.tingwu_mind_map_enabled,
+            "ppt_extraction": self.config.tingwu_ppt_extraction_enabled,
+            "auto_chapters": self.config.tingwu_auto_chapters_enabled,
+            "text_polish": self.config.tingwu_text_polish_enabled,
+            "custom_prompt": custom_prompt_enabled,
+            "meeting_agent_events": True,
         }
+
+    def task_analysis_parameters(self) -> dict[str, Any]:
+        parameters: dict[str, Any] = {
+            "model": self.config.tingwu_analysis_model,
+            "keyInformationEnabled": self.config.tingwu_key_information_enabled,
+            "actionsEnabled": self.config.tingwu_actions_enabled,
+            "fullSummaryEnabled": self.config.tingwu_full_summary_enabled,
+            "fullSummaryFormat": "markdown",
+            "conversationalEnabled": self.config.tingwu_conversational_enabled,
+            "questionsAnsweringEnabled": self.config.tingwu_questions_answering_enabled,
+            "mindMapEnabled": self.config.tingwu_mind_map_enabled,
+            "pptExtractionEnabled": self.config.tingwu_ppt_extraction_enabled,
+            "autoChaptersEnabled": self.config.tingwu_auto_chapters_enabled,
+            "textPolishEnabled": self.config.tingwu_text_polish_enabled,
+            "customPromptEnabled": bool(self.config.tingwu_custom_prompt_enabled and self.config.tingwu_custom_prompt.strip()),
+        }
+        if self.config.tingwu_mind_map_format.strip():
+            parameters["mindMapFormat"] = self.config.tingwu_mind_map_format.strip()
+        if self.config.tingwu_auto_chapter_granularity.strip():
+            parameters["autoChapterGranularity"] = self.config.tingwu_auto_chapter_granularity.strip()
+        if self.config.tingwu_auto_chapter_title_length_level.strip():
+            parameters["autoChapterTitleLengthLevel"] = self.config.tingwu_auto_chapter_title_length_level.strip()
+        if parameters["customPromptEnabled"]:
+            parameters["customPromptModel"] = self.config.tingwu_custom_prompt_model.strip() or "tingwu-turbo"
+            parameters["customPromptTransType"] = self.config.tingwu_custom_prompt_trans_type.strip() or "chat"
+            parameters["customPromptContent"] = self.config.tingwu_custom_prompt.strip()
+        return parameters
 
     def active_meeting_id(self) -> str | None:
         with self._lock:
@@ -1202,6 +1249,17 @@ class TingwuMeetingProvider:
                 response=result,
             )
             return result
+        transcription_parameters = remove_none(
+            {
+                "model": self.config.tingwu_transcription_model,
+                "languageHints": self.language_hints() or None,
+                "diarizationEnabled": True,
+                "diarizationSpeakerCount": 0,
+                "translationEnabled": bool(self.config.tingwu_translation_enabled and self.translation_target_langs()),
+                "translationTargetLang": self.translation_target_langs() or None,
+                "phraseId": self.config.tingwu_phrase_id.strip() or None,
+            }
+        )
         payload = {
             "model": "tingwu-meeting",
             "input": {
@@ -1212,14 +1270,8 @@ class TingwuMeetingProvider:
                 "sampleRate": self.config.tingwu_sample_rate,
             },
             "parameters": {
-                "transcription": {
-                    "model": self.config.tingwu_transcription_model,
-                    "languageHints": self.language_hints() or None,
-                    "diarizationEnabled": True,
-                    "diarizationSpeakerCount": 0,
-                    "translationEnabled": False,
-                },
-                "audio": {"audioChannelMode": ""},
+                "transcription": transcription_parameters,
+                "audio": {"audioChannelMode": self.config.tingwu_audio_channel_mode.strip()},
                 "analysis": self.task_analysis_parameters(),
             },
         }
@@ -1594,14 +1646,16 @@ class TingwuMeetingProvider:
             message = f"{output.get('errorCode') or ''}: {output.get('errorMessage') or ''}".strip(": ")
             raise TingwuMeetingError(redact_sensitive_text(message or json.dumps(event, ensure_ascii=False))[:1000])
         text = extract_transcript_text(event)
+        speaker = extract_speaker(event)
+        self._record_realtime_raw_event(meeting_id, event_type, event, text=text, speaker=speaker)
         if text:
             self._append_transcript(
                 meeting_id,
                 text,
-                speaker=extract_speaker(event),
+                speaker=speaker,
                 final=is_final_transcript(event),
             )
-        self._emit(meeting_id, "tingwu_event", {"type": event_type, "text": text, "final": is_final_transcript(event)})
+        self._emit(meeting_id, "tingwu_event", {"type": event_type, "text": text, "speaker": speaker, "final": is_final_transcript(event)})
 
     def _stop_tingwu_client(self, client: TingWuRealtime, session: TingwuMeetingSession) -> None:
         try:
@@ -1660,6 +1714,49 @@ class TingwuMeetingProvider:
         self._write_transcript(session)
         self._persist_session(session)
 
+    def _record_realtime_raw_event(self, meeting_id: str, event_type: str, event: dict[str, Any], *, text: str, speaker: str) -> None:
+        session = self._sessions.get(meeting_id)
+        if session is None:
+            return
+        raw_events = session.task_payload.setdefault("raw_realtime_events", [])
+        if not isinstance(raw_events, list):
+            raw_events = []
+            session.task_payload["raw_realtime_events"] = raw_events
+        raw_events.append(
+            {
+                "timestamp": utc_now(),
+                "type": event_type,
+                "speaker": speaker,
+                "text": text,
+                "final": is_final_transcript(event),
+                "event": compact_event_payload(event),
+            }
+        )
+        del raw_events[:-MAX_TINGWU_RAW_EVENTS]
+
+        agent_event = extract_agent_event(event)
+        if agent_event:
+            self._append_agent_event(session, agent_event)
+
+    def _record_agent_event(self, meeting_id: str, event: dict[str, Any]) -> None:
+        session = self._sessions.get(meeting_id)
+        if session is None:
+            return
+        agent_event = extract_agent_event(event) or {
+            "timestamp": utc_now(),
+            "type": "agent_result",
+            "event": compact_event_payload(event),
+        }
+        self._append_agent_event(session, agent_event)
+
+    def _append_agent_event(self, session: TingwuMeetingSession, event: dict[str, Any]) -> None:
+        agent_events = session.task_payload.setdefault("agent_events", [])
+        if not isinstance(agent_events, list):
+            agent_events = []
+            session.task_payload["agent_events"] = agent_events
+        agent_events.append(compact_event_payload(event))
+        del agent_events[:-MAX_TINGWU_AGENT_EVENTS]
+
     def _emit(self, meeting_id: str, event: str, payload: dict[str, object] | None = None) -> None:
         queue = self._event_queues.get(meeting_id)
         clean_payload = compact_event_payload(payload or {})
@@ -1704,6 +1801,7 @@ class TingwuMeetingProvider:
     def _write_minutes(self, session: TingwuMeetingSession) -> Path:
         path = self._session_artifact_path(session, "minutes_path", "tingwu_ai_minutes.md")
         minutes = normalize_minutes_payload(session.ai_minutes)
+        feature_sections = tingwu_feature_sections(session.ai_minutes)
         lines = [
             f"# {session.title} AI Minutes",
             "",
@@ -1719,6 +1817,8 @@ class TingwuMeetingProvider:
             "",
             "## Action Items",
             *([f"- {item}" for item in minutes["action_items"]] or ["- 暂无明确待办，需要人工补充。"]),
+            "",
+            *feature_sections,
             "",
             "## Raw Tingwu Result",
             "```json",
@@ -2089,16 +2189,26 @@ class TingwuMeetingProvider:
         output = payload.get("output") if isinstance(payload.get("output"), dict) else {}
         hydrated = dict(payload)
         hydrated_output = dict(output)
-        for key in (
+        artifact_keys = {
             "transcriptionPath",
             "translationsPath",
             "summarizationPath",
             "meetingAssistancePath",
             "autoChaptersPath",
+            "mindMapPath",
             "pptExtractionPath",
             "textPolishPath",
             "customPromptPath",
-        ):
+            "keyInformationPath",
+            "questionsAnsweringPath",
+            "conversationalPath",
+        }
+        artifact_keys.update(
+            str(key)
+            for key, value in output.items()
+            if str(key).endswith("Path") and isinstance(value, str) and value and value.lower() != "null"
+        )
+        for key in sorted(artifact_keys):
             url = output.get(key)
             if isinstance(url, str) and url and url.lower() != "null":
                 hydrated_output[key] = redact_url_origin(url)
@@ -2272,22 +2382,211 @@ def extract_speaker(event: dict[str, Any]) -> str:
     payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
     output = payload.get("output") if isinstance(payload.get("output"), dict) else {}
     transcription = output.get("transcription") if isinstance(output.get("transcription"), dict) else {}
+    legacy_output = event.get("output") if isinstance(event.get("output"), dict) else {}
     candidates = [
         event.get("speaker"),
         event.get("speaker_id"),
         event.get("speakerId"),
+        event.get("speakerID"),
+        event.get("speakerName"),
+        event.get("speakerLabel"),
+        event.get("role"),
+        event.get("role_id"),
+        event.get("roleId"),
+        event.get("channel"),
+        event.get("channel_id"),
+        event.get("channelId"),
         output.get("speaker"),
         output.get("speaker_id"),
         output.get("speakerId"),
+        output.get("speakerID"),
+        output.get("speakerName"),
+        output.get("speakerLabel"),
+        output.get("role"),
+        output.get("role_id"),
+        output.get("roleId"),
+        output.get("channel"),
+        output.get("channel_id"),
+        output.get("channelId"),
         transcription.get("speaker"),
         transcription.get("speaker_id"),
         transcription.get("speakerId"),
+        transcription.get("speakerID"),
         transcription.get("speakerName"),
+        transcription.get("speakerLabel"),
+        transcription.get("role"),
+        transcription.get("role_id"),
+        transcription.get("roleId"),
+        transcription.get("channel"),
+        transcription.get("channel_id"),
+        transcription.get("channelId"),
+        legacy_output.get("speaker"),
+        legacy_output.get("speaker_id"),
+        legacy_output.get("speakerId"),
+        legacy_output.get("speakerName"),
     ]
     for candidate in candidates:
-        if candidate not in {None, ""}:
-            return f"Speaker {candidate}" if isinstance(candidate, int) else str(candidate)
+        speaker = normalize_speaker(candidate)
+        if speaker:
+            return speaker
+    nested = find_nested_speaker(event)
+    if nested:
+        return nested
     return "Unknown"
+
+
+def normalize_speaker(candidate: Any) -> str:
+    if candidate in {None, ""}:
+        return ""
+    if isinstance(candidate, bool):
+        return ""
+    if isinstance(candidate, (int, float)):
+        return f"Speaker {int(candidate)}"
+    if isinstance(candidate, str):
+        value = candidate.strip()
+        if not value or value.lower() in {"unknown", "none", "null", "undefined"}:
+            return ""
+        if re.fullmatch(r"\d+(?:\.0+)?", value):
+            return f"Speaker {int(float(value))}"
+        return value
+    if isinstance(candidate, dict):
+        for key in (
+            "speaker",
+            "speaker_id",
+            "speakerId",
+            "speakerID",
+            "speakerName",
+            "speakerLabel",
+            "role",
+            "role_id",
+            "roleId",
+            "channel",
+            "channel_id",
+            "channelId",
+        ):
+            speaker = normalize_speaker(candidate.get(key))
+            if speaker:
+                return speaker
+    return ""
+
+
+def find_nested_speaker(value: Any, *, depth: int = 0) -> str:
+    if depth > 6:
+        return ""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            normalized_key = re.sub(r"[^a-z0-9]", "", str(key).lower())
+            if normalized_key in {
+                "speaker",
+                "speakerid",
+                "speakername",
+                "speakerlabel",
+                "role",
+                "roleid",
+                "channel",
+                "channelid",
+            }:
+                speaker = normalize_speaker(item)
+                if speaker:
+                    return speaker
+        for item in value.values():
+            speaker = find_nested_speaker(item, depth=depth + 1)
+            if speaker:
+                return speaker
+    elif isinstance(value, list):
+        for item in value:
+            speaker = find_nested_speaker(item, depth=depth + 1)
+            if speaker:
+                return speaker
+    return ""
+
+
+def extract_agent_event(event: dict[str, Any]) -> dict[str, Any] | None:
+    payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+    output = payload.get("output") if isinstance(payload.get("output"), dict) else {}
+    action = str(output.get("action") or event.get("action") or event.get("type") or event.get("event") or "")
+    agent_result = output.get("agent_result") if isinstance(output.get("agent_result"), dict) else {}
+    commands = output.get("commands") if isinstance(output.get("commands"), list) else []
+    if action != "agent_result" and not agent_result and not commands:
+        return None
+    command_items = [item for item in commands if isinstance(item, dict)]
+    meeting_commands = [item for item in command_items if str(item.get("name") or "") == "meeting_state_change"]
+    meeting_data_ids = [
+        str((item.get("arguments") if isinstance(item.get("arguments"), dict) else {}).get("dataId") or "").strip()
+        for item in meeting_commands
+    ]
+    return remove_none(
+        {
+            "timestamp": utc_now(),
+            "type": action or "agent_result",
+            "agent_id": str(agent_result.get("agentId") or output.get("agentId") or ""),
+            "text": _text_from_candidate(agent_result) or _text_from_candidate(output.get("text")),
+            "data_id": next((item for item in meeting_data_ids if item), ""),
+            "meeting_state_commands": meeting_commands,
+            "event": compact_event_payload(event),
+        }
+    )
+
+
+def tingwu_feature_sections(payload: dict[str, Any]) -> list[str]:
+    sections: list[str] = []
+    section_specs = [
+        ("Full Summary", ("FullSummary", "fullSummary", "ParagraphSummary", "paragraphSummary", "summary", "Summary")),
+        ("Speaker Summary", ("ConversationalSummary", "conversationalSummary", "SpeakerSummary", "speakerSummary")),
+        ("Key Information", ("KeyInformation", "keyInformation", "KeyInformations", "keyInformations", "KeySentences", "keySentences")),
+        ("Questions And Answers", ("QuestionsAnswering", "questionsAnswering", "Questions", "questions", "QA", "qa")),
+        ("Auto Chapters", ("AutoChapters", "autoChapters", "Chapters", "chapters")),
+        ("Mind Map", ("MindMap", "mindMap")),
+        ("PPT Extraction", ("PptExtraction", "pptExtraction", "PPTExtraction", "PPT")),
+        ("Text Polish", ("TextPolish", "textPolish")),
+        ("Custom Prompt", ("CustomPrompt", "customPrompt")),
+        ("Translations", ("Translations", "translationsPathData", "translations")),
+        ("Transcription", ("Transcription", "transcriptionPathData", "transcription")),
+    ]
+    for title, keys in section_specs:
+        value = first_feature_value(payload, keys)
+        text = feature_markdown(value)
+        if text:
+            sections.extend([f"## {title}", text, ""])
+    while sections and sections[-1] == "":
+        sections.pop()
+    return sections
+
+
+def first_feature_value(payload: Any, keys: tuple[str, ...]) -> Any:
+    for item in minutes_candidate_objects(payload):
+        value = first_present_case_insensitive(item, keys)
+        if value is not None and value != "":
+            return value
+    return None
+
+
+def feature_markdown(value: Any, *, depth: int = 0) -> str:
+    if value is None or value == "":
+        return ""
+    if depth > 4:
+        return json.dumps(value, ensure_ascii=False)[:4000]
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (int, float, bool)):
+        return str(value)
+    if isinstance(value, list):
+        items = [feature_markdown(item, depth=depth + 1).strip() for item in value]
+        items = [item for item in items if item]
+        if not items:
+            return ""
+        return "\n".join(f"- {item}" if "\n" not in item else f"- {item.replace(chr(10), chr(10) + '  ')}" for item in items[:30])
+    if isinstance(value, dict):
+        text = _text_from_candidate(value)
+        if text and len(text) > 8:
+            return text
+        parts: list[str] = []
+        for key, item in value.items():
+            rendered = feature_markdown(item, depth=depth + 1).strip()
+            if rendered:
+                parts.append(f"- {key}: {rendered}" if "\n" not in rendered else f"- {key}:\n  {rendered.replace(chr(10), chr(10) + '  ')}")
+        return "\n".join(parts[:30])
+    return str(value)
 
 
 def truthy_marker(value: Any) -> bool:
@@ -2410,7 +2709,14 @@ def minutes_candidate_objects(payload: Any) -> list[dict[str, Any]]:
                 "meetingAssistancePathData",
                 "autoChaptersPathData",
                 "transcriptionPathData",
+                "translationsPathData",
+                "mindMapPathData",
+                "pptExtractionPathData",
+                "textPolishPathData",
                 "customPromptPathData",
+                "keyInformationPathData",
+                "questionsAnsweringPathData",
+                "conversationalPathData",
                 "Summarization",
                 "MeetingAssistance",
             ):

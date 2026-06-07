@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import select
+import shutil
+import subprocess
 import threading
 import time
 from http import HTTPStatus
@@ -137,7 +141,7 @@ class CameraStreamState:
 
         camera = None
         try:
-            camera = open_camera(self.camera_index, width=self.width, height=self.height)
+            camera = open_stream_camera(self.camera_index, width=self.width, height=self.height)
             frame_index = 0
             last_fps_at = time.monotonic()
             frames_since_fps = 0
@@ -209,6 +213,141 @@ class CameraStreamState:
             previous_frame = int(self._latest_status.get("frame_index", 0))
             self._latest_status = {**status, "frame_index": previous_frame + 1}
             self._condition.notify_all()
+
+
+class RpicamMjpegCapture:
+    def __init__(self, camera_index: int, *, width: int | None, height: int | None, framerate: float = 15.0):
+        binary = shutil.which("rpicam-vid") or shutil.which("libcamera-vid")
+        if not binary:
+            raise RuntimeError("rpicam-vid/libcamera-vid is not available")
+        self.camera_index = camera_index
+        self.width = width or 1280
+        self.height = height or 720
+        self.framerate = framerate
+        self.process: subprocess.Popen[bytes] | None = None
+        self._buffer = bytearray()
+        command = [
+            binary,
+            "--camera",
+            str(camera_index),
+            "-n",
+            "--codec",
+            "mjpeg",
+            "--width",
+            str(self.width),
+            "--height",
+            str(self.height),
+            "--framerate",
+            str(framerate),
+            "--timeout",
+            "0",
+            "--output",
+            "-",
+            "--flush",
+            "--verbose",
+            "0",
+        ]
+        self.process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
+
+    def read(self) -> tuple[bool, Any]:
+        import cv2
+        import numpy as np
+
+        process = self.process
+        if process is None or process.stdout is None:
+            return False, None
+
+        deadline = time.monotonic() + 2.0
+        fd = process.stdout.fileno()
+        while time.monotonic() < deadline:
+            jpeg = self._pop_jpeg()
+            if jpeg is not None:
+                frame = cv2.imdecode(np.frombuffer(jpeg, dtype=np.uint8), cv2.IMREAD_COLOR)
+                if frame is not None:
+                    return True, frame
+
+            if process.poll() is not None:
+                error = self._read_stderr_tail()
+                raise RuntimeError(f"rpicam-vid camera {self.camera_index} exited with {process.returncode}: {error}".strip())
+
+            remaining = max(0.0, deadline - time.monotonic())
+            ready, _, _ = select.select([fd], [], [], min(0.2, remaining))
+            if not ready:
+                continue
+            chunk = os.read(fd, 65536)
+            if not chunk:
+                return False, None
+            self._buffer.extend(chunk)
+            if len(self._buffer) > 8 * 1024 * 1024:
+                start = self._buffer.rfind(b"\xff\xd8")
+                if start > 0:
+                    del self._buffer[:start]
+                else:
+                    self._buffer.clear()
+        return False, None
+
+    def release(self) -> None:
+        process = self.process
+        self.process = None
+        if process is None:
+            return
+        process.terminate()
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=2)
+
+    def _pop_jpeg(self) -> bytes | None:
+        start = self._buffer.find(b"\xff\xd8")
+        if start < 0:
+            if len(self._buffer) > 4096:
+                del self._buffer[:-2]
+            return None
+        if start > 0:
+            del self._buffer[:start]
+            start = 0
+        end = self._buffer.find(b"\xff\xd9", start + 2)
+        if end < 0:
+            return None
+        jpeg = bytes(self._buffer[start : end + 2])
+        del self._buffer[: end + 2]
+        return jpeg
+
+    def _read_stderr_tail(self) -> str:
+        process = self.process
+        if process is None or process.stderr is None:
+            return ""
+        try:
+            ready, _, _ = select.select([process.stderr.fileno()], [], [], 0)
+            if not ready:
+                return ""
+            return os.read(process.stderr.fileno(), 4096).decode("utf-8", errors="replace").strip().splitlines()[-1]
+        except (OSError, IndexError):
+            return ""
+
+
+def open_stream_camera(camera_index: int, *, width: int | None, height: int | None) -> Any:
+    rpicam_error: Exception | None = None
+    if shutil.which("rpicam-vid") or shutil.which("libcamera-vid"):
+        capture: RpicamMjpegCapture | None = None
+        try:
+            capture = RpicamMjpegCapture(camera_index, width=width, height=height)
+            ok, frame = capture.read()
+            if ok and frame is not None:
+                return capture
+            raise RuntimeError(f"rpicam-vid camera {camera_index} produced no frame")
+        except Exception as exc:
+            rpicam_error = exc
+            if capture is not None:
+                capture.release()
+
+    try:
+        return open_camera(camera_index, width=width, height=height)
+    except Exception as exc:
+        if rpicam_error is not None:
+            raise RuntimeError(f"{rpicam_error}; OpenCV fallback failed: {exc}") from exc
+        raise
 
 
 def draw_overlay(frame: Any, target: Any, *, backend: str, fps: float) -> Any:

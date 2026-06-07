@@ -13,11 +13,17 @@ import { SkillChip } from "../components/SkillChip";
 import { StatusBadge } from "../components/StatusBadge";
 import { mockSecurity } from "../data/mockSecurity";
 import { useCameraStream } from "../hooks/useCameraStream";
-import { buildForegroundReply } from "../utils/foregroundReply";
+import { buildForegroundReply, isLocalControlText } from "../utils/foregroundReply";
 import { createId } from "../utils/id";
 import "./pages.css";
 
 const quickPrompts = ["总结今天的会议纪要", "查找 5 月份的项目文档", "生成周报草稿", "显示系统状态", "清理临时文件"];
+
+function directReplyAttachment(kind: string): string {
+  if (kind === "lamp_control") return "本地台灯控制 · 未调用 Qwen";
+  if (kind === "meeting_control") return "本地会议控制 · 未调用 Qwen";
+  return "直接回复 · 未触发本地任务";
+}
 
 export function AssistantPage() {
   const [messages, setMessages] = useState<AssistantMessage[]>([
@@ -63,17 +69,20 @@ export function AssistantPage() {
       { id: createId("assistant-user"), role: "user", text: trimmed, time: now },
     ]);
     const foreground = buildForegroundReply(trimmed, "assistant");
-    setMessages((items) => [
-      ...items,
-      {
-        id: createId("assistant-foreground"),
-        role: "assistant",
-        text: foreground.text,
-        time: new Date().toTimeString().slice(0, 5),
-        status: "running",
-        attachment: foreground.attachment || undefined,
-      },
-    ]);
+    const localControl = isLocalControlText(trimmed);
+    if (!localControl) {
+      setMessages((items) => [
+        ...items,
+        {
+          id: createId("assistant-foreground"),
+          role: "assistant",
+          text: foreground.text,
+          time: new Date().toTimeString().slice(0, 5),
+          status: "running",
+          attachment: foreground.attachment || undefined,
+        },
+      ]);
+    }
     setInput("");
     setSending(true);
     setError("");
@@ -86,7 +95,7 @@ export function AssistantPage() {
       }, { sessionId, page: "assistant", speak: true });
       setSessionId(result.data.session_id);
       const assistantMessage = result.data.assistant_message;
-      if (result.data.route.kind === "chat" && assistantMessage) {
+      if (assistantMessage) {
         const chatResult: AssistantManualResponse = {
           message_id: result.data.message_id,
           detected_intent: result.data.route.intent,
@@ -110,7 +119,7 @@ export function AssistantPage() {
             text: assistantMessage.text,
             time: new Date().toTimeString().slice(0, 5),
             status: assistantMessage.provider_status ?? "completed",
-            attachment: "直接回复 · 未触发本地任务",
+            attachment: directReplyAttachment(result.data.route.kind),
           },
         ]);
       } else {
@@ -174,7 +183,7 @@ export function AssistantPage() {
         },
       ]);
       const assistant = result.data.assistant;
-      if (assistant?.route.kind === "chat" && assistant.assistant_message) {
+      if (assistant?.assistant_message) {
         setMessages((items) => [
           ...items,
           {
@@ -183,7 +192,7 @@ export function AssistantPage() {
             text: assistant.assistant_message?.text ?? "",
             time: new Date().toTimeString().slice(0, 5),
             status: assistant.assistant_message?.provider_status ?? "completed",
-            attachment: "直接回复 · 未触发本地任务",
+            attachment: directReplyAttachment(assistant.route.kind),
           },
         ]);
       } else {

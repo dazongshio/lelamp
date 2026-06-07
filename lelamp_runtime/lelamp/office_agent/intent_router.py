@@ -4,6 +4,8 @@ import re
 from dataclasses import dataclass, field
 
 from .audit import AuditLogger
+from .lelamp_voice_skill import parse_lamp_voice_command
+from .meeting_voice_skill import parse_meeting_voice_command
 
 
 @dataclass(frozen=True)
@@ -41,6 +43,28 @@ class OfficeIntentRouter:
         return route
 
     def _route(self, normalized: str, original: str) -> IntentRoute:
+        meeting_command = parse_meeting_voice_command(original)
+        if meeting_command is not None:
+            return IntentRoute(
+                intent="meeting_voice_control",
+                skill="meeting_voice_control",
+                confidence=0.92,
+                requires_confirmation=False,
+                summary="本地会议语音控制命令",
+                action=meeting_command.action,
+                slots={"label": meeting_command.label},
+            )
+        lamp_command = parse_lamp_voice_command(original)
+        if lamp_command is not None:
+            return IntentRoute(
+                intent="lelamp_voice_control",
+                skill="lelamp_voice_control",
+                confidence=0.92,
+                requires_confirmation=False,
+                summary="本地台灯语音控制命令",
+                action=lamp_command.action,
+                slots={"label": lamp_command.label},
+            )
         if self._has(
             normalized,
             "全权",

@@ -25,6 +25,7 @@ export type StatusKind =
   | "needs_backend"
   | "needs_config"
   | "needs_hardware"
+  | "unsupported"
   | "optional"
   | "not_applicable"
   | "deployment_note"
@@ -265,6 +266,41 @@ export interface SharedPreviewResponse {
   truncated?: boolean;
   download_only?: boolean;
   document_text_backend?: string;
+}
+
+export interface DocmostSpace {
+  id?: string;
+  name?: string;
+  slug?: string;
+  [key: string]: unknown;
+}
+
+export interface DocmostStatus {
+  provider: "docmost" | string;
+  status: StatusKind | string;
+  url: string;
+  default_space: string;
+  configured: boolean;
+  message?: string;
+  workspace?: Record<string, unknown>;
+  spaces?: DocmostSpace[];
+  resolved_space?: DocmostSpace;
+  details?: Record<string, unknown>;
+}
+
+export interface DocmostSyncResponse {
+  status: StatusKind | string;
+  provider: "docmost" | string;
+  source_file: string;
+  source_kind: string;
+  extraction?: Record<string, unknown>;
+  docmost_url: string;
+  docmost_page_id: string;
+  docmost_page_url: string;
+  docmost_page_title: string;
+  docmost_space_id: string;
+  docmost_space_slug: string;
+  task_id?: string;
 }
 
 export interface AuditEvent {
@@ -703,6 +739,14 @@ export interface TingwuProviderStatus {
   mic_probe?: Record<string, unknown>;
   sample_rate: number;
   audio_format: string;
+  transcription_model?: string;
+  analysis_model?: string;
+  translation_enabled?: boolean;
+  translation_target_lang?: string[];
+  phrase_id_configured?: boolean;
+  hot_words_configured?: boolean;
+  audio_channel_mode?: string;
+  capabilities?: Record<string, boolean>;
   language_hints: string[];
   active_meeting_id?: string | null;
   active_count?: number;
@@ -800,6 +844,7 @@ export interface MeetingRealtimeStatus {
   audio_rms?: number;
   audio_peak?: number;
   tingwu_http_operations?: Array<Record<string, unknown>>;
+  task_payload?: Record<string, unknown>;
   output_dir?: string;
   transcript_path?: string;
   audio_path?: string;
@@ -1080,6 +1125,9 @@ export interface SceneObserveImageResponse {
   source: string;
   image_path: string;
   workspace_name: string;
+  camera_index?: number;
+  rotation_degrees?: number;
+  cam0_rotate_180?: boolean;
   analysis: Record<string, unknown>;
   events: SceneEvent[];
   suggestions?: SceneWorkflowSuggestion[];
@@ -1098,6 +1146,45 @@ export interface SceneSensorSnapshotResponse {
   events: SceneEvent[];
   event_count: number;
   suggestions?: SceneWorkflowSuggestion[];
+  safety?: string[];
+}
+
+export interface SceneAmbientCamera {
+  camera_index: number;
+  status: StatusKind | string;
+  rotation_degrees?: number;
+  cam0_rotate_180?: boolean;
+  source?: string;
+  workspace_name?: string;
+  image_url?: string;
+  path?: string;
+  events?: SceneEvent[];
+  message?: string;
+  analysis?: Record<string, unknown>;
+}
+
+export interface SceneAmbientTranscript {
+  channel: "left" | "right" | "mono" | string;
+  label: string;
+  status: StatusKind | string;
+  text: string;
+  audio_workspace_name?: string;
+  rms?: number;
+  peak?: number;
+  duration_seconds?: number;
+  message?: string;
+}
+
+export interface SceneAmbientCaptureResponse {
+  task_id?: string;
+  status: StatusKind | string;
+  source: string;
+  include_cameras?: boolean;
+  include_mic?: boolean;
+  camera_count: number;
+  cameras: SceneAmbientCamera[];
+  microphone: Record<string, unknown>;
+  transcripts: SceneAmbientTranscript[];
   safety?: string[];
 }
 
@@ -1251,6 +1338,51 @@ export interface VoiceCaptureResponse {
   capture?: Record<string, unknown>;
   assistant?: AssistantMessageResponse;
   message?: string;
+}
+
+export interface LeLampVoiceCommandResponse {
+  handled: boolean;
+  text: string;
+  status: StatusKind | string;
+  reply?: string;
+  command?: {
+    action?: string;
+    label?: string;
+    reply?: string;
+    rgb?: number[] | null;
+    recording?: string | null;
+    [key: string]: unknown;
+  };
+  hardware_result?: string;
+  details?: Record<string, unknown>;
+  pid?: number;
+  log?: string;
+  message?: string;
+  [key: string]: unknown;
+}
+
+export type LeLampMotorName = "base_yaw" | "base_pitch" | "elbow_pitch" | "wrist_roll" | "wrist_pitch";
+
+export interface LeLampMotorControlResponse {
+  status: StatusKind | string;
+  hardware_enabled?: boolean;
+  port?: string;
+  lamp_id?: string;
+  motors?: LeLampMotorName[];
+  pose?: Partial<Record<LeLampMotorName, number>>;
+  saved_poses?: {
+    default?: Partial<Record<LeLampMotorName, number>>;
+    scan?: Partial<Record<LeLampMotorName, number>>;
+    projection?: Partial<Record<LeLampMotorName, number>>;
+  };
+  pose_readable?: boolean;
+  before?: Partial<Record<LeLampMotorName, number>>;
+  target?: Partial<Record<LeLampMotorName, number>>;
+  actual?: Partial<Record<LeLampMotorName, number>>;
+  errors?: Partial<Record<LeLampMotorName, number>>;
+  max_error?: number;
+  error?: string;
+  duration_ms?: number;
 }
 
 export interface VoiceConversationSession {

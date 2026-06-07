@@ -1,9 +1,9 @@
-import { Mic, Radio, RefreshCw, Speaker, Speech, Volume2, Waves } from "lucide-react";
+import { Lightbulb, Mic, Radio, RefreshCw, Send, Speaker, Speech, Volume2, Waves } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useState } from "react";
 import { apiErrorMessage } from "../api/client";
-import { getVoiceStatus, postVoiceCaptureOnce, sendVoiceConversationTurn, startVoiceConversation, stopVoiceConversation } from "../api/assistant";
-import type { VoiceCaptureResponse, VoiceConversationResponse, VoiceStatus } from "../api/types";
+import { getVoiceStatus, postVoiceCaptureOnce, sendLeLampVoiceCommand, sendVoiceConversationTurn, startVoiceConversation, stopVoiceConversation } from "../api/assistant";
+import type { LeLampVoiceCommandResponse, VoiceCaptureResponse, VoiceConversationResponse, VoiceStatus } from "../api/types";
 import { Card, InfoCard } from "../components/Card";
 import { PageHeader } from "../components/PageHeader";
 import { SkillChip } from "../components/SkillChip";
@@ -19,8 +19,11 @@ export function VoicePage() {
   const [seconds, setSeconds] = useState(4);
   const [wakeWord, setWakeWord] = useState("小灯");
   const [turnText, setTurnText] = useState("小灯 帮我总结今天的工作状态");
+  const [lampCommandText, setLampCommandText] = useState("点头");
+  const [lampCommand, setLampCommand] = useState<LeLampVoiceCommandResponse | null>(null);
   const [rememberTurn, setRememberTurn] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [lampBusy, setLampBusy] = useState(false);
   const [conversationBusy, setConversationBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -106,6 +109,25 @@ export function VoicePage() {
     }
   }
 
+  async function sendLampCommand(text = lampCommandText) {
+    const commandText = text.trim();
+    if (!commandText) {
+      setError("请输入台灯控制文字。");
+      return;
+    }
+    setLampCommandText(commandText);
+    setLampBusy(true);
+    setError("");
+    try {
+      const response = await sendLeLampVoiceCommand(commandText);
+      setLampCommand(response.data);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setLampBusy(false);
+    }
+  }
+
   return (
     <>
       <PageHeader
@@ -135,6 +157,36 @@ export function VoicePage() {
               <summary>语音诊断</summary>
               <div className="advanced-panel__content">
                 <pre className="json-preview voice-result-preview">{JSON.stringify(status ?? { status: "pending" }, null, 2)}</pre>
+              </div>
+            </details>
+          </Card>
+
+          <Card title="台灯文字命令" subtitle="直接复用应用内台灯语音 skill；输入文字后按同一套本地控制逻辑执行">
+            <div className="lamp-command-form">
+              <label className="span-2">
+                <span>控制文字</span>
+                <textarea className="input" value={lampCommandText} onChange={(event) => setLampCommandText(event.target.value)} />
+              </label>
+              <div className="lamp-command-actions span-2">
+                <button className="primary-button" onClick={() => void sendLampCommand()} disabled={lampBusy}>
+                  <Send size={16} />发送
+                </button>
+                {["点头", "摇头", "停止跟随", "回到默认状态", "扫描成 PDF", "台灯状态"].map((item) => (
+                  <button className="ghost-button" key={item} onClick={() => void sendLampCommand(item)} disabled={lampBusy}>{item}</button>
+                ))}
+              </div>
+            </div>
+            <div className="definition-grid">
+              <span>执行状态</span><StatusBadge status={lampCommand?.status ?? "pending"} />
+              <span>识别动作</span><strong>{lampCommandAction(lampCommand)}</strong>
+              <span>回复</span><strong>{lampCommand?.reply ?? "等待输入文字命令"}</strong>
+              <span>硬件结果</span><strong>{lampCommand?.hardware_result ?? lampCommand?.message ?? "尚未执行"}</strong>
+              <span>扫描 PDF</span><strong>{lampCommandPdf(lampCommand)}</strong>
+            </div>
+            <details className="advanced-panel">
+              <summary>台灯命令诊断</summary>
+              <div className="advanced-panel__content">
+                <pre className="json-preview voice-result-preview">{JSON.stringify(lampCommand ?? { status: "pending", text: lampCommandText }, null, 2)}</pre>
               </div>
             </details>
           </Card>
@@ -205,12 +257,27 @@ export function VoicePage() {
 
         <Card title="安全约束">
           <div className="security-summary">
+            <SkillChip><Lightbulb size={14} />台灯文字命令复用本地语音 skill</SkillChip>
             {(status?.safety ?? ["explicit capture only", "no continuous microphone stream from web console"]).map((item) => <SkillChip key={item}>{friendlySafety(item)}</SkillChip>)}
           </div>
         </Card>
       </div>
     </>
   );
+}
+
+function lampCommandAction(command: LeLampVoiceCommandResponse | null) {
+  if (!command) return "等待命令";
+  if (!command.handled) return "未命中台灯命令";
+  const action = command.command?.action ? String(command.command.action) : "";
+  const label = command.command?.label ? String(command.command.label) : "";
+  return [action, label].filter(Boolean).join(" / ") || "已识别";
+}
+
+function lampCommandPdf(command: LeLampVoiceCommandResponse | null) {
+  if (!command) return "尚未生成";
+  const name = command.pdf_workspace_name ?? (command.pdf && typeof command.pdf === "object" ? (command.pdf as Record<string, unknown>).pdf_workspace_name : "");
+  return name ? String(name) : "尚未生成";
 }
 
 function VoiceStatusRow({ icon, label, value, detail }: { icon: ReactNode; label: string; value: string; detail: string }) {

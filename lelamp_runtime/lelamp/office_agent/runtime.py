@@ -9,13 +9,16 @@ from .daily import LocalDailyService
 from .desktop import DesktopService
 from .desktop_automation import BrowserAutomationService
 from .desktop_tasks import DesktopTaskQueue
+from .docmost import DocmostService
 from .documents import DocumentService
 from .environment import EnvironmentSensingService
 from .enterprise import EnterprisePolicyService
 from .file_search import LocalFileSearchService
 from .intent_router import OfficeIntentRouter
 from .lelamp_experience import LeLampExperienceService
+from .lelamp_voice_skill import LeLampVoiceSkill
 from .meeting import MeetingService
+from .meeting_voice_skill import MeetingVoiceSkill
 from .memory import MemoryService
 from .mobile_bridge import MobileBridgeConfig, MobileBridgeService
 from .p0 import P0OfficeService
@@ -52,9 +55,12 @@ class OfficeRuntime:
     environment: EnvironmentSensingService
     enterprise: EnterprisePolicyService
     lelamp_experience: LeLampExperienceService
+    lelamp_voice: LeLampVoiceSkill
+    meeting_voice: MeetingVoiceSkill
     smart_home: SmartHomeService
     mobile_bridge: MobileBridgeService
     xiaoai: XiaoAiService
+    docmost: DocmostService
     p0: P0OfficeService
     planner: TaskPlanner
     intent_router: OfficeIntentRouter
@@ -72,6 +78,7 @@ class OfficeRuntime:
             "memory_path": str(self.config.memory_path),
             "desktop_backend": self.config.desktop_backend,
             "hardware_enabled": self.config.enable_hardware,
+            "rgb_enabled": self.config.enable_rgb,
             "meeting_mode_enabled": self.meeting.status()["meeting_mode_enabled"],
             "smart_home_provider": self.config.smart_home_provider,
             "mobile_bridge_status": self.mobile_bridge.status(),
@@ -98,6 +105,16 @@ def build_runtime(config: OfficeAgentConfig | None = None) -> OfficeRuntime:
     camera_observer = CameraObserverService(workspace=workspace, audit=audit, scene=scene)
     environment = EnvironmentSensingService(audit=audit, scene=scene)
     lelamp_experience = LeLampExperienceService(audit=audit, scene=scene, projection=projection)
+    scanning = ScanService(workspace, audit, config)
+    lelamp_voice = LeLampVoiceSkill(
+        config=config,
+        audit=audit,
+        camera_observer=camera_observer,
+        scanning=scanning,
+        workspace=workspace,
+        projection=projection,
+    )
+    meeting_voice = MeetingVoiceSkill(config=config, audit=audit)
     return OfficeRuntime(
         config=config,
         audit=audit,
@@ -105,7 +122,7 @@ def build_runtime(config: OfficeAgentConfig | None = None) -> OfficeRuntime:
         skills=skills,
         meeting=meeting,
         documents=DocumentService(workspace, audit, config),
-        scanning=ScanService(workspace, audit, config),
+        scanning=scanning,
         projection=projection,
         scene=scene,
         memory=MemoryService(config.memory_path, audit),
@@ -125,6 +142,8 @@ def build_runtime(config: OfficeAgentConfig | None = None) -> OfficeRuntime:
         environment=environment,
         enterprise=EnterprisePolicyService(config=config, audit=audit),
         lelamp_experience=lelamp_experience,
+        lelamp_voice=lelamp_voice,
+        meeting_voice=meeting_voice,
         smart_home=SmartHomeService(
             audit,
             SmartHomeConfig(
@@ -144,6 +163,7 @@ def build_runtime(config: OfficeAgentConfig | None = None) -> OfficeRuntime:
             ),
         ),
         xiaoai=XiaoAiService(audit),
+        docmost=DocmostService(config, audit),
         p0=P0OfficeService(
             workspace=workspace,
             audit=audit,

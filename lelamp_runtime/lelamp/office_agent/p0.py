@@ -186,14 +186,25 @@ class P0OfficeService:
                 context={"task": "meeting_followup_email", "title": title},
                 timeout=120,
             )
+            if not draft.strip():
+                raise LLMError("ResponsesLLM returned an empty email draft.")
         except LLMError as exc:
-            payload = {
-                "status": "backend_missing",
-                "message": str(exc),
-                "email_draft_path": "",
-                "provider": "ResponsesLLM",
-            }
-            self.audit.record("p0.meeting_followup_email_write", status="blocked", target=title, details=payload)
+            payload = self.generate_followup_email_locally(
+                title=title,
+                recipient=recipient,
+                decisions=decisions,
+                action_items=action_items,
+                minutes_text=minutes_text,
+            )
+            payload.update(
+                {
+                    "provider": "local_rules_fallback",
+                    "fallback_after": "ResponsesLLM",
+                    "fallback_error": str(exc),
+                    "message": "云端邮件草稿生成失败，已改用本地规则生成；不会自动发送。",
+                }
+            )
+            self.audit.record("p0.meeting_followup_email_write.fallback", target=title, details=payload)
             return payload
 
         email_path = self.workspace.write_text(

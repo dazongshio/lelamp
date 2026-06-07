@@ -19,6 +19,9 @@ from zoneinfo import ZoneInfo
 from lelamp.office_agent.llm import LLMError, ResponsesLLM, ResponsesLLMConfig
 from lelamp.office_agent.config import PermissionMode
 from lelamp.office_agent.desktop_companion import build_desktop_companion
+from lelamp.office_agent.hardware import LampHardware
+from lelamp.office_agent.lelamp_voice_skill import parse_lamp_voice_command
+from lelamp.office_agent.meeting_voice_skill import execute_runtime_meeting_voice_command, parse_meeting_voice_command
 from lelamp.office_agent.prompts import OFFICE_AGENT_INSTRUCTIONS
 from lelamp.office_agent.projection_viewer import ProjectionPreviewServer, find_free_port
 from lelamp.office_agent.runtime import build_runtime
@@ -476,6 +479,30 @@ def _extract_reminder_time(text: str) -> datetime | None:
     return candidate
 
 
+def run_lamp_voice_command(runtime, text: str) -> dict[str, object]:
+    command = parse_lamp_voice_command(text)
+    if command is None:
+        return runtime.lelamp_voice.handle_text(text)
+    if command.action in {"start_follow", "stop_follow", "status"}:
+        return runtime.lelamp_voice.handle_text(text)
+    with LampHardware(
+        enabled=runtime.config.enable_hardware,
+        port=runtime.config.hardware_port,
+        lamp_id=runtime.config.lamp_id,
+        audit=runtime.audit,
+        rgb_enabled=runtime.config.enable_rgb,
+    ) as hardware:
+        runtime.lelamp_voice.set_hardware(hardware)
+        return runtime.lelamp_voice.handle_text(text)
+
+
+def run_meeting_voice_command(runtime, text: str) -> dict[str, object]:
+    return runtime.meeting_voice.handle_text(
+        text,
+        executor=lambda command, raw_text: execute_runtime_meeting_voice_command(runtime, command, raw_text),
+    )
+
+
 def run_manual_agent(runtime, text: str) -> dict[str, object]:
     route = runtime.intent_router.route(text)
     started = time.perf_counter()
@@ -486,6 +513,12 @@ def run_manual_agent(runtime, text: str) -> dict[str, object]:
     if route.intent == "p0_status":
         tool = "get_p0_status"
         result = runtime.p0.status()
+    elif route.intent == "meeting_voice_control":
+        tool = "control_meeting_by_voice"
+        result = run_meeting_voice_command(runtime, text)
+    elif route.intent == "lelamp_voice_control":
+        tool = "control_lamp_by_voice"
+        result = run_lamp_voice_command(runtime, text)
     elif route.intent == "lelamp_capabilities":
         tool = "list_lelamp_capabilities"
         result = runtime.lelamp_experience.capability_map()
@@ -766,6 +799,8 @@ def run_tool(runtime, tool: str, args: argparse.Namespace) -> object:
     if tool == "lelamp":
         if args.lelamp_command == "status":
             return runtime.lelamp_experience.capability_map()
+        if args.lelamp_command == "voice":
+            return run_lamp_voice_command(runtime, args.text)
         if args.lelamp_command == "state":
             return runtime.lelamp_experience.state_cue(args.state)
         if args.lelamp_command == "observe":
@@ -792,6 +827,10 @@ def run_tool(runtime, tool: str, args: argparse.Namespace) -> object:
                 decisions=args.decision or [],
             )
         raise ValueError(f"Unknown lelamp command: {args.lelamp_command}")
+    if tool == "meeting":
+        if args.meeting_command == "voice":
+            return run_meeting_voice_command(runtime, args.text)
+        raise ValueError(f"Unknown meeting command: {args.meeting_command}")
     if tool == "p0":
         return runtime.p0.status()
     if tool == "skills":
@@ -965,6 +1004,9 @@ def main() -> None:
 
     lelamp_sub.add_parser("status", help="Show LeLamp-specific capability map")
 
+    lelamp_voice = lelamp_sub.add_parser("voice", help="Parse and execute a LeLamp voice command")
+    lelamp_voice.add_argument("text")
+
     lelamp_state = lelamp_sub.add_parser("state", help="Show RGB and movement cue for an assistant state")
     lelamp_state.add_argument("state")
 
@@ -990,6 +1032,11 @@ def main() -> None:
     lelamp_actions.add_argument("title")
     lelamp_actions.add_argument("--action", action="append")
     lelamp_actions.add_argument("--decision", action="append")
+
+    meeting = subparsers.add_parser("meeting", help="Meeting local voice commands and workflow helpers")
+    meeting_sub = meeting.add_subparsers(dest="meeting_command", required=True)
+    meeting_voice = meeting_sub.add_parser("voice", help="Parse and execute a meeting voice command")
+    meeting_voice.add_argument("text")
 
     subparsers.add_parser("p0", help="Show P0 office assistant capability status")
     subparsers.add_parser("skills", help="Show OpenClaw office skills with permission and I/O contracts")

@@ -4,6 +4,7 @@ import type {
   LeLampMotionStatusResponse,
   SceneEnvironmentResponse,
   SceneEvent,
+  SceneAmbientCaptureResponse,
   SceneObserveImageResponse,
   SceneOrientedScanResponse,
   SceneRecentResponse,
@@ -61,6 +62,7 @@ export async function observeSceneImage(payload: {
 export async function captureDeviceSceneObservation(payload: {
   title?: string;
   camera_index?: number;
+  cam0_rotate_180?: boolean;
   timeout_seconds?: number;
 } = {}): Promise<ApiResult<SceneObserveImageResponse>> {
   const data = await request<SceneObserveImageResponse>("/api/scene/device-observe", {
@@ -77,6 +79,7 @@ export async function captureSceneSensorSnapshot(payload: {
   include_hardware?: boolean;
   mic_seconds?: number;
   camera_index?: number;
+  cam0_rotate_180?: boolean;
   lux?: number;
   people_count?: number;
   presence?: boolean;
@@ -85,6 +88,20 @@ export async function captureSceneSensorSnapshot(payload: {
   calendar_event_now?: boolean;
 } = {}): Promise<ApiResult<SceneSensorSnapshotResponse>> {
   const data = await request<SceneSensorSnapshotResponse>("/api/scene/sensor-snapshot", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return { data, source: "api" };
+}
+
+export async function captureSceneAmbientInput(payload: {
+  mic_seconds?: number;
+  camera_indices?: number[];
+  include_cameras?: boolean;
+  include_mic?: boolean;
+  cam0_rotate_180?: boolean;
+} = {}): Promise<ApiResult<SceneAmbientCaptureResponse>> {
+  const data = await request<SceneAmbientCaptureResponse>("/api/scene/ambient-capture", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -105,6 +122,7 @@ export async function runSceneOrientedScan(payload: {
   max_step?: number;
   hold_seconds?: number;
   camera_index?: number;
+  cam0_rotate_180?: boolean;
   include_mic?: boolean;
   lux?: number;
   people_count?: number;

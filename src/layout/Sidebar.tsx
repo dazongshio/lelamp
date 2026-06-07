@@ -14,9 +14,11 @@ import {
   MousePointerClick,
   Radar,
   Settings,
+  SlidersHorizontal,
   Smartphone,
   Speech,
   Wand,
+  Library,
 } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import "./layout.css";
@@ -30,6 +32,7 @@ const navSections = [
       { to: "/assistant", label: "助手", icon: Bot },
       { to: "/meeting", label: "会议助手", icon: CalendarCheck },
       { to: "/documents", label: "文档处理", icon: FileText },
+      { to: "/wiki", label: "Wiki 知识库", icon: Library },
       { to: "/projection", label: "投影", icon: Monitor },
     ],
   },
@@ -39,6 +42,7 @@ const navSections = [
       { to: "/desktop", label: "桌面代理", icon: MousePointerClick },
       { to: "/scene", label: "场景感知", icon: Radar },
       { to: "/voice", label: "语音", icon: Speech },
+      { to: "/motors", label: "五轴控制", icon: SlidersHorizontal },
       { to: "/mobile", label: "移动端", icon: Smartphone },
       { to: "/smart-home", label: "智能设备", icon: Wand },
     ],

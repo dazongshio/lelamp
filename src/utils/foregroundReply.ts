@@ -13,6 +13,22 @@ const intentRules: Array<{
   mode?: "query" | "task";
 }> = [
   {
+    intent: "lamp_control",
+    patterns: [/点头|摇头|回到默认|默认位置|默认状态|复位台灯|台灯复位|扫描成?pdf|扫描PDF|拍照扫描|灯头扫描|开始投影|启动投影|打开投影|进入投影|切到投影|投影位置|跟随我|开始跟随|启动跟随|停止跟随|停止追踪|别跟|不要跟|台灯状态|加电|掉电|松开电机|开灯|关灯|暖光|白光|红灯|绿灯|蓝灯|黄灯|紫灯/i],
+    replies: [
+      "正在执行本地台灯控制。",
+    ],
+    backend: "本地：LeLamp voice skill -> 硬件控制，不调用 Qwen",
+  },
+  {
+    intent: "meeting_control",
+    patterns: [/会议状态|当前会议|听悟状态|听写状态|转写状态|听悟服务状态|会议服务状态|开始会议|启动会议|会议开始|开会了|开始开会|开始实时会议|启动实时会议|开始会议记录|开启会议记录|启动会议记录|开始记录会议|开始记录|启动记录|开始听悟会议|启动听悟会议|打开听悟会议|开始听写|开启听写|启动听写|开始转写|开启转写|启动转写|实时转写|记录会议|录会议|开始录会议|停止会议|结束会议|散会|结束开会|停止实时会议|结束实时会议|停止会议记录|结束会议记录|关闭会议记录|停止记录会议|停止记录|结束记录|停止听悟会议|结束听悟会议|关闭听悟会议|停止听写|结束听写|关闭听写|停止转写|结束转写|关闭转写|拉取会议纪要|获取会议纪要|同步会议纪要|生成听悟纪要|获取听悟纪要|拉取听悟纪要|生成会议ai|会议智能纪要|听悟智能纪要|会议思维导图|生成思维导图|会议ppt|会议问答|开启会议模式|关闭会议模式|本地转写状态|本地实时转写|本地会议状态|导出会议转写|导出转写|导出会议原文|保存会议转写|保存会议原文|导出会议记录|保存会议记录|生成会议纪要|整理会议纪要|做会议纪要|生成纪要|整理纪要|总结会议内容|会议内容总结|会议总结|总结这次会议|整理这次会议|提取会议决策|生成会议决策|会议决策|决策事项|确认事项|提取会议待办|生成会议待办|会议待办|行动项|待办事项|生成待办事项|整理待办事项|任务列表|会议任务|生成会议提醒|会议提醒|待办提醒|生成会议跟进|会议跟进包|会后跟进|会后跟进包|会议投影确认|投影会议确认|投影决策待办|投影会议结果|显示会议结果|展示会议结果|导出会议材料|导出会议包|导出跟进包|打包会议材料|下载会议材料/i],
+    replies: [
+      "正在执行本地会议控制。",
+    ],
+    backend: "本地：meeting voice skill -> 会议/听悟控制，不调用 Qwen",
+  },
+  {
     intent: "weather_or_time",
     patterns: [/天气|气温|下雨|温度|今天|明天|时间|几点|日期|过0点|时区|查询|查一下|查下|看看|搜索|资料|信息|状态|进度/i],
     replies: [
@@ -92,6 +108,18 @@ const intentRules: Array<{
     backend: "后台：意图识别 -> Skill 规划 -> 执行或等待确认 -> 返回结果",
   },
 ];
+
+export function isLampControlText(message: string): boolean {
+  const normalized = message.trim();
+  return intentRules[0].patterns.some((pattern) => pattern.test(normalized));
+}
+
+export function isLocalControlText(message: string): boolean {
+  const normalized = message.trim();
+  return intentRules
+    .filter((rule) => rule.intent === "lamp_control" || rule.intent === "meeting_control")
+    .some((rule) => rule.patterns.some((pattern) => pattern.test(normalized)));
+}
 
 export function buildForegroundReply(message: string, page = "assistant"): ForegroundReply {
   const normalized = message.trim();

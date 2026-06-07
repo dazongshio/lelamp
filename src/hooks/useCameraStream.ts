@@ -6,16 +6,34 @@ import type { CameraStreamStatus } from "../api/types";
 const AUTO_PREF_KEY = "lelamp_camera_stream_auto";
 const AUTO_PREF_EVENT = "lelamp_camera_stream_auto_change";
 
-function autoEnabledByDefault(): boolean {
-  return localStorage.getItem(AUTO_PREF_KEY) !== "off";
-}
-
-export function useCameraStream(autoStart = false, options: {
+type CameraStreamOptions = {
   cameraIndex?: number;
   width?: number;
   height?: number;
   backend?: string;
-} = {}) {
+};
+
+const CAMERA_STREAM_SETTLED_STATUSES = new Set(["online", "error", "failed", "blocked", "unavailable", "stopped"]);
+
+function autoEnabledByDefault(): boolean {
+  return localStorage.getItem(AUTO_PREF_KEY) !== "off";
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function waitForCameraStreamReady(initial: CameraStreamStatus): Promise<CameraStreamStatus> {
+  let current = initial;
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    if (CAMERA_STREAM_SETTLED_STATUSES.has(String(current.status || ""))) return current;
+    await sleep(500);
+    current = (await getCameraStreamStatus()).data;
+  }
+  return current;
+}
+
+export function useCameraStream(autoStart = false, options: CameraStreamOptions = {}) {
   const [status, setStatus] = useState<CameraStreamStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [autoEnabled, setAutoEnabled] = useState(autoEnabledByDefault);
@@ -34,19 +52,21 @@ export function useCameraStream(autoStart = false, options: {
     }
   }, []);
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (overrides: CameraStreamOptions = {}) => {
     if (startPromiseRef.current) return startPromiseRef.current;
     setLoading(true);
+    const nextOptions = { ...options, ...overrides };
     const promise = startCameraStream({
-      camera_index: options.cameraIndex,
-      width: options.width,
-      height: options.height,
-      backend: options.backend,
+      camera_index: nextOptions.cameraIndex,
+      width: nextOptions.width,
+      height: nextOptions.height,
+      backend: nextOptions.backend,
     })
-      .then((result) => {
-        setStatus(result.data);
+      .then(async (result) => {
+        const nextStatus = await waitForCameraStreamReady(result.data);
+        setStatus(nextStatus);
         setError("");
-        return result.data;
+        return nextStatus;
       })
       .catch((err) => {
         setError(apiErrorMessage(err));
@@ -88,11 +108,11 @@ export function useCameraStream(autoStart = false, options: {
     }
   }, []);
 
-  const enableAuto = useCallback(async () => {
+  const enableAuto = useCallback(async (overrides: CameraStreamOptions = {}) => {
     localStorage.setItem(AUTO_PREF_KEY, "on");
     setAutoEnabled(true);
     window.dispatchEvent(new Event(AUTO_PREF_EVENT));
-    return start();
+    return start(overrides);
   }, [start]);
 
   useEffect(() => {

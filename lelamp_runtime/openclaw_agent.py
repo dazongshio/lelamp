@@ -23,6 +23,7 @@ async def entrypoint(ctx: agents.JobContext):
         port=config.hardware_port,
         lamp_id=config.lamp_id,
         audit=runtime.audit,
+        rgb_enabled=config.enable_rgb,
     ) as hardware:
         agent = OpenClawOfficeAgent(
             config=config,
@@ -43,6 +44,7 @@ async def entrypoint(ctx: agents.JobContext):
             camera_observer=runtime.camera_observer,
             environment=runtime.environment,
             lelamp_experience=runtime.lelamp_experience,
+            lelamp_voice=runtime.lelamp_voice,
             smart_home=runtime.smart_home,
             xiaoai=runtime.xiaoai,
             p0=runtime.p0,

@@ -162,6 +162,28 @@ SKILLS: tuple[SkillSpec, ...] = (
         fallback_behavior="Return adapter_ready/degraded results when camera, motors, RGB, or projector hardware is absent.",
         status="adapter_ready",
     ),
+    SkillSpec(
+        name="lelamp_voice_control",
+        mode="sandbox",
+        description="Deterministic Mandarin voice commands for LeLamp light, expression recordings, and dual-camera human following.",
+        implemented=True,
+        permission_notes="Requires OPENCLAW_ENABLE_HARDWARE=1 for physical output. Human following starts an auditable local perception process.",
+        input_contract=("voice transcript", "configured LELAMP_PORT/LELAMP_ID", "optional running hardware adapter"),
+        output_contract=("parsed local command", "hardware/follow process status", "short spoken confirmation"),
+        fallback_behavior="Return handled command with needs_hardware/hardware_unavailable status instead of guessing or moving servos blindly.",
+        status="adapter_ready",
+    ),
+    SkillSpec(
+        name="meeting_voice_control",
+        mode="sandbox",
+        description="Deterministic Mandarin commands for meeting mode, Tingwu realtime capture, minutes, decisions, action items, reminders, and projection confirmation.",
+        implemented=True,
+        permission_notes="Realtime capture may open the configured microphone through Tingwu. AI assistant sessions are not stopped by meeting commands.",
+        input_contract=("voice or text transcript", "editable meeting_voice_commands.json", "configured Tingwu provider for realtime capture"),
+        output_contract=("parsed meeting command", "meeting/realtime status", "workspace outputs or clear blocked reason"),
+        fallback_behavior="Return local backend/provider errors directly; do not fall through to Qwen for deterministic meeting control commands.",
+        status="adapter_ready",
+    ),
 )
 
 

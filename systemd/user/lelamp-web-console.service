@@ -4,12 +4,12 @@ After=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/dazis/LeLamp/lelamp_runtime
-ExecStart=/home/dazis/LeLamp/scripts/start_fixed_console.sh
+WorkingDirectory=/home/lemp/lelamp/lelamp_runtime
+ExecStart=/home/lemp/lelamp/scripts/start_fixed_console.sh
 Restart=always
 RestartSec=3
-StandardOutput=append:/home/dazis/LeLamp/lelamp_runtime/workspace/.web_console_fixed.log
-StandardError=append:/home/dazis/LeLamp/lelamp_runtime/workspace/.web_console_fixed.log
+StandardOutput=append:/home/lemp/lelamp/lelamp_runtime/workspace/.web_console_fixed.log
+StandardError=append:/home/lemp/lelamp/lelamp_runtime/workspace/.web_console_fixed.log
 
 [Install]
 WantedBy=default.target

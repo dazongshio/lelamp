@@ -1,8 +1,9 @@
-import { Bell, Camera, CameraOff, Eye, FileSearch, Lightbulb, MonitorX, RefreshCw, RotateCw, Sparkles, Upload, Users } from "lucide-react";
+import { Bell, Camera, CameraOff, Eye, FileSearch, Image as ImageIcon, Lightbulb, MessageCircle, Mic, MonitorX, RefreshCw, RotateCw, Sparkles, Upload, Users, Video } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiErrorMessage } from "../api/client";
 import {
   captureDeviceSceneObservation,
+  captureSceneAmbientInput,
   captureSceneSensorSnapshot,
   getLeLampMotionStatus,
   getSceneRecent,
@@ -16,6 +17,7 @@ import {
 } from "../api/scene";
 import type {
   LeLampMotionStatusResponse,
+  SceneAmbientCaptureResponse,
   SceneEnvironmentResponse,
   SceneEvent,
   SceneObserveImageResponse,
@@ -38,6 +40,7 @@ export function ScenePage() {
   const [triggerResult, setTriggerResult] = useState<SceneWorkflowTriggerResponse | null>(null);
   const [imageResult, setImageResult] = useState<SceneObserveImageResponse | null>(null);
   const [sensorSnapshot, setSensorSnapshot] = useState<SceneSensorSnapshotResponse | null>(null);
+  const [ambientInput, setAmbientInput] = useState<SceneAmbientCaptureResponse | null>(null);
   const [motionStatus, setMotionStatus] = useState<LeLampMotionStatusResponse | null>(null);
   const [orientedScan, setOrientedScan] = useState<SceneOrientedScanResponse | null>(null);
   const [trackingRun, setTrackingRun] = useState<SceneTrackingRunResponse | null>(null);
@@ -48,10 +51,14 @@ export function ScenePage() {
   const [speechActive, setSpeechActive] = useState(false);
   const [projectorBlocked, setProjectorBlocked] = useState(false);
   const [calendarEventNow, setCalendarEventNow] = useState(false);
+  const [cam0Rotate180, setCam0Rotate180] = useState(true);
+  const [cameraPanelMode, setCameraPanelMode] = useState<"video" | "photo">("video");
+  const [livePreviewCameraIndex, setLivePreviewCameraIndex] = useState(0);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
-  const cameraStream = useCameraStream(false, { cameraIndex: 1, width: 1280, height: 720, backend: "auto" });
+  const cameraStream = useCameraStream(false, { cameraIndex: livePreviewCameraIndex, width: 1280, height: 720, backend: "auto" });
+  const cameraStreamIssue = cameraStream.error || cameraStreamIssueMessage(cameraStream.status);
   const selectedCameraIndex = cameraStream.cameraIndex ?? readCameraIndex(sensorSnapshot) ?? 1;
 
   const load = useCallback(async () => {
@@ -111,6 +118,7 @@ export function ScenePage() {
       const response = await captureDeviceSceneObservation({
         title: "desk_scene_observation",
         camera_index: selectedCameraIndex,
+        cam0_rotate_180: cam0Rotate180,
       });
       setImageResult(response.data);
       setSuggestions(response.data.suggestions ?? []);
@@ -133,6 +141,7 @@ export function ScenePage() {
         include_hardware: true,
         mic_seconds: 1,
         camera_index: selectedCameraIndex,
+        cam0_rotate_180: cam0Rotate180,
         lux,
         people_count: peopleCount,
         presence,
@@ -142,6 +151,69 @@ export function ScenePage() {
       setSensorSnapshot(response.data);
       setSuggestions(response.data.suggestions ?? []);
       await load();
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  function mergeAmbientInput(previous: SceneAmbientCaptureResponse | null, next: SceneAmbientCaptureResponse): SceneAmbientCaptureResponse {
+    return {
+      ...next,
+      cameras: next.include_cameras === false ? previous?.cameras ?? [] : next.cameras,
+      camera_count: next.include_cameras === false ? previous?.camera_count ?? 0 : next.camera_count,
+      microphone: next.include_mic === false ? previous?.microphone ?? { status: "skipped" } : next.microphone,
+      transcripts: next.include_mic === false ? previous?.transcripts ?? [] : next.transcripts,
+    };
+  }
+
+  async function captureAmbientCameras() {
+    setError("");
+    setBusy("ambient_cameras");
+    setCameraPanelMode("photo");
+    try {
+      const response = await captureSceneAmbientInput({
+        include_cameras: true,
+        include_mic: false,
+        mic_seconds: 1,
+        camera_indices: [0, 1],
+        cam0_rotate_180: cam0Rotate180,
+      });
+      setAmbientInput((previous) => mergeAmbientInput(previous, response.data));
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function captureAmbientTranscript() {
+    setError("");
+    setBusy("ambient_transcript");
+    try {
+      const response = await captureSceneAmbientInput({
+        include_cameras: false,
+        include_mic: true,
+        mic_seconds: 4,
+        camera_indices: [0, 1],
+        cam0_rotate_180: cam0Rotate180,
+      });
+      setAmbientInput((previous) => mergeAmbientInput(previous, response.data));
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function openLiveCamera(cameraIndex = livePreviewCameraIndex) {
+    setError("");
+    setBusy("camera_stream");
+    setCameraPanelMode("video");
+    setLivePreviewCameraIndex(cameraIndex);
+    try {
+      await cameraStream.start({ cameraIndex, width: 1280, height: 720, backend: "auto" });
     } catch (err) {
       setError(apiErrorMessage(err));
     } finally {
@@ -164,6 +236,7 @@ export function ScenePage() {
         max_step: 3,
         hold_seconds: 0.45,
         camera_index: selectedCameraIndex,
+        cam0_rotate_180: cam0Rotate180,
         include_mic: false,
         lux,
         people_count: peopleCount,
@@ -279,7 +352,9 @@ export function ScenePage() {
         actions={
           <>
             <button className="primary-button" onClick={() => void captureSensorSnapshot()} disabled={busy === "sensors"}><Sparkles size={16} />读取当前传感器</button>
-            <button className="ghost-button" onClick={() => void (cameraStream.isRunning ? cameraStream.stop() : cameraStream.start())} disabled={cameraStream.loading}>
+            <button className="ghost-button" onClick={() => void captureAmbientCameras()} disabled={busy === "ambient_cameras"}><Camera size={16} />检查双摄</button>
+            <button className="ghost-button" onClick={() => void captureAmbientTranscript()} disabled={busy === "ambient_transcript"}><MessageCircle size={16} />语音听写</button>
+            <button className="ghost-button" onClick={() => void (cameraStream.isRunning ? cameraStream.stop() : openLiveCamera(livePreviewCameraIndex))} disabled={cameraStream.loading || busy === "camera_stream"}>
               {cameraStream.isRunning ? <CameraOff size={16} /> : <Camera size={16} />}
               {cameraStream.isRunning ? "关闭相机常开" : "开启相机预览"}
             </button>
@@ -300,31 +375,137 @@ export function ScenePage() {
         </div>
 
         <Card
-          title="设备实时视角"
-          subtitle="用于确认 LeLamp 当前看到的画面；开启后只显示预览，分析仍需用户点击读取传感器或转动观察"
-          action={<StatusBadge status={cameraStream.isRunning ? "online" : "stopped"} label={cameraStream.isRunning ? "预览中" : "已关闭"} />}
+          title="双摄像头检查 / 语音转文字"
+          subtitle="双摄检查只采集 cam0/cam1 快照；语音听写只录制左右声道并生成类似微信的文字气泡"
+          action={<StatusBadge status={ambientInput?.status ?? "pending"} label={ambientInput ? friendlyStatus(ambientInput.status) : "等待"} />}
         >
-          <div className="scene-camera-preview">
-            {cameraStream.isRunning && cameraStream.streamUrl ? (
-              <img src={cameraStream.streamUrl} alt="LeLamp camera live preview" />
+          <div className="scene-actions scene-actions--compact">
+            <div className="segmented-control scene-camera-mode-toggle" role="tablist" aria-label="相机查看模式">
+              <button className={cameraPanelMode === "video" ? "selected" : ""} type="button" onClick={() => void openLiveCamera(livePreviewCameraIndex)}>
+                <Video size={15} />摄像
+              </button>
+              <button className={cameraPanelMode === "photo" ? "selected" : ""} type="button" onClick={() => setCameraPanelMode("photo")}>
+                <ImageIcon size={15} />照片
+              </button>
+            </div>
+            <label className="inline-check scene-toggle-control">
+              <input type="checkbox" checked={cam0Rotate180} onChange={(event) => setCam0Rotate180(event.target.checked)} />
+              <RotateCw size={15} />
+              cam0 旋转 180°
+            </label>
+            <SkillChip muted>{cam0Rotate180 ? "cam0 default: 180deg" : "cam0 default: 0deg"}</SkillChip>
+          </div>
+          <div className="scene-sensor-grid">
+            {[0, 1].map((index) => {
+              const camera = ambientInput?.cameras.find((item) => Number(item.camera_index) === index);
+              return (
+                <div className="scene-sensor-card" key={index}>
+                  <strong>{index === 0 ? "cam0 固定相机" : "cam1 灯头相机"}</strong>
+                  <StatusBadge status={camera?.status ?? "pending"} label={camera ? friendlyStatus(camera.status) : "等待"} />
+                  <span>{cameraNoteFromAmbient(camera)}</span>
+                </div>
+              );
+            })}
+            <div className="scene-sensor-card">
+              <strong>左声道</strong>
+              <StatusBadge status={ambientTranscriptStatus(ambientInput, "left")} label={ambientTranscriptLabel(ambientInput, "left")} />
+              <span>{ambientAudioLevel(ambientInput, "left")}</span>
+            </div>
+            <div className="scene-sensor-card">
+              <strong>右声道</strong>
+              <StatusBadge status={ambientTranscriptStatus(ambientInput, "right")} label={ambientTranscriptLabel(ambientInput, "right")} />
+              <span>{ambientAudioLevel(ambientInput, "right")}</span>
+            </div>
+          </div>
+          {cameraPanelMode === "video" ? (
+            <div className="scene-live-camera-panel">
+              <div className="scene-live-toolbar">
+                <div className="segmented-control" role="tablist" aria-label="实时相机选择">
+                  {[0, 1].map((index) => (
+                    <button className={livePreviewCameraIndex === index ? "selected" : ""} type="button" key={index} onClick={() => void openLiveCamera(index)}>
+                      <Camera size={15} />{index === 0 ? "cam0" : "cam1"}
+                    </button>
+                  ))}
+                </div>
+                <button className="ghost-button" type="button" onClick={() => void (cameraStream.isRunning ? cameraStream.stop() : openLiveCamera(livePreviewCameraIndex))} disabled={cameraStream.loading || busy === "camera_stream"}>
+                  {cameraStream.isRunning ? <CameraOff size={16} /> : <Video size={16} />}
+                  {cameraStream.isRunning ? "停止摄像" : "开始摄像"}
+                </button>
+              </div>
+              <div className="scene-camera-preview scene-camera-preview--inline">
+                {cameraStream.isRunning && cameraStream.streamUrl ? (
+                  <img className={livePreviewCameraIndex === 0 && cam0Rotate180 ? "camera-rotated-180" : undefined} src={cameraStream.streamUrl} alt={`camera ${livePreviewCameraIndex} live preview`} />
+                ) : (
+                  <div className="scene-camera-placeholder">
+                    <Video size={28} />
+                    <strong>等待实时摄像</strong>
+                    <span>选择 cam0 或 cam1 后点击“开始摄像”。</span>
+                  </div>
+                )}
+              </div>
+              <div className="scene-actions">
+                {cameraStream.previewUrl && <a className="ghost-button" href={cameraStream.previewUrl} target="_blank" rel="noreferrer">新窗口查看</a>}
+                <SkillChip>camera {cameraStream.cameraIndex ?? livePreviewCameraIndex}</SkillChip>
+                <SkillChip muted>{cameraStream.isRunning ? "live video" : "video stopped"}</SkillChip>
+              </div>
+              {cameraStreamIssue && <div className="danger-panel">相机预览不可用：{cameraStreamIssue}</div>}
+            </div>
+          ) : (
+            <div className="scene-camera-pair-grid">
+              {[0, 1].map((index) => {
+                const camera = ambientInput?.cameras.find((item) => Number(item.camera_index) === index);
+                return (
+                  <div className="scene-camera-frame" key={index}>
+                    <div className="row-between">
+                      <strong>{index === 0 ? "cam0 固定相机" : "cam1 灯头相机"}</strong>
+                      <StatusBadge status={camera?.status ?? "pending"} label={camera ? friendlyStatus(camera.status) : "等待"} />
+                    </div>
+                    {camera?.image_url ? (
+                      <img className={cameraImageClass(index, camera, cam0Rotate180)} src={camera.image_url} alt={`camera ${index} capture`} />
+                    ) : (
+                      <div className="scene-camera-frame__empty">
+                        <CameraOff size={22} />
+                        <span>{camera?.message || "还没有相机图片"}</span>
+                      </div>
+                    )}
+                    <span className="small muted">{ambientCameraMetrics(camera)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <div className="scene-chat-list">
+            {ambientInput?.transcripts.length ? (
+              ambientInput.transcripts.map((item) => (
+                <div className={`scene-chat-bubble scene-chat-bubble--${item.channel === "right" ? "right" : "left"}`} key={`${item.channel}-${item.audio_workspace_name ?? item.label}`}>
+                  <div className="scene-chat-meta">
+                    <Mic size={14} />
+                    <strong>{item.label || friendlyAudioChannel(item.channel)}</strong>
+                    <StatusBadge status={item.status} label={friendlyStatus(item.status)} />
+                  </div>
+                  <p>{item.text || item.message || "没有识别到文字"}</p>
+                </div>
+              ))
             ) : (
               <div className="scene-camera-placeholder">
-                <Camera size={28} />
-                <strong>相机预览未开启</strong>
-                <span>点击“开启相机预览”后可在这里看到设备视角。</span>
+                <MessageCircle size={28} />
+                <strong>等待语音输入</strong>
+                <span>点击“语音听写”后说一句话；系统会按左右声道生成文字气泡。</span>
               </div>
             )}
           </div>
           <div className="scene-actions">
-            <button className="primary-button" onClick={() => void (cameraStream.isRunning ? cameraStream.stop() : cameraStream.start())} disabled={cameraStream.loading}>
-              {cameraStream.isRunning ? <CameraOff size={16} /> : <Camera size={16} />}
-              {cameraStream.isRunning ? "关闭相机常开" : "开启相机预览"}
-            </button>
-            {cameraStream.previewUrl && <a className="ghost-button" href={cameraStream.previewUrl} target="_blank" rel="noreferrer">新窗口查看</a>}
-            <SkillChip>camera {selectedCameraIndex}</SkillChip>
-            <SkillChip muted>{cameraStream.isRunning ? "always-on preview" : "manual preview"}</SkillChip>
+            <button className="primary-button" onClick={() => void captureAmbientCameras()} disabled={busy === "ambient_cameras"}><Camera size={16} />检查双摄</button>
+            <button className="ghost-button" onClick={() => void captureAmbientTranscript()} disabled={busy === "ambient_transcript"}><MessageCircle size={16} />录音转文字</button>
+            <SkillChip>cam0 + cam1</SkillChip>
+            <SkillChip muted>{ambientInput?.microphone?.channel_count ? `${String(ambientInput.microphone.channel_count)} channel audio` : "left/right ASR"}</SkillChip>
           </div>
-          {cameraStream.error && <div className="danger-panel">相机预览不可用：{cameraStream.error}</div>}
+          <details className="advanced-panel">
+            <summary>双摄 / 转写原始结果</summary>
+            <div className="advanced-panel__content">
+              <pre className="json-preview scene-preview">{JSON.stringify(ambientInput ?? { status: "pending", message: "等待采集双摄像头和左右声道语音。" }, null, 2)}</pre>
+            </div>
+          </details>
         </Card>
 
         <Card
@@ -661,6 +842,87 @@ function sensorStatus(snapshot: SceneSensorSnapshotResponse | null, key: "camera
   return readObjectStatus(snapshot[key]);
 }
 
+function cameraStreamIssueMessage(status: { status?: string; details?: Record<string, unknown>; message?: string } | null) {
+  if (!status) return "";
+  const publicStatus = String(status.status || "");
+  if (!["error", "failed", "blocked", "unavailable"].includes(publicStatus)) return "";
+  const details = status.details ?? {};
+  const detailError = String(details.error || "");
+  const detailStatus = String(details.status || "");
+  const message = String(status.message || "");
+  return detailError || (detailStatus ? `stream status: ${detailStatus}` : message);
+}
+
+function cameraNoteFromAmbient(camera: SceneAmbientCaptureResponse["cameras"][number] | undefined) {
+  if (!camera) return "等待采集";
+  const workspace = camera.workspace_name || "";
+  if (workspace) return workspace;
+  return camera.message || String(camera.source || "无快照");
+}
+
+function cameraImageClass(index: number, camera: SceneAmbientCaptureResponse["cameras"][number], cam0Rotate180: boolean) {
+  const serverRotation = Number(camera.rotation_degrees);
+  if (index === 0 && cam0Rotate180 && serverRotation !== 180) return "camera-rotated-180";
+  return undefined;
+}
+
+function ambientCameraMetrics(camera: SceneAmbientCaptureResponse["cameras"][number] | undefined) {
+  if (!camera) return "等待采集";
+  const metrics = camera.analysis?.metrics;
+  if (!metrics || typeof metrics !== "object") return camera.workspace_name || camera.message || "无图像指标";
+  const width = Number((metrics as Record<string, unknown>).width);
+  const height = Number((metrics as Record<string, unknown>).height);
+  const brightness = Number((metrics as Record<string, unknown>).brightness);
+  const size = Number.isFinite(width) && Number.isFinite(height) ? `${width}x${height}` : "";
+  const light = Number.isFinite(brightness) ? `亮度 ${brightness.toFixed(1)}` : "";
+  const rotation = Number(camera.rotation_degrees);
+  const rotationLabel = Number.isFinite(rotation) && rotation !== 0 ? `旋转 ${rotation}°` : "";
+  return [camera.workspace_name, size, light, rotationLabel].filter(Boolean).join(" · ");
+}
+
+function ambientTranscriptStatus(snapshot: SceneAmbientCaptureResponse | null, channel: "left" | "right") {
+  if (!snapshot) return "pending";
+  const item = findAmbientTranscript(snapshot, channel);
+  if (!item) {
+    const mono = findAmbientTranscript(snapshot, "mono");
+    return mono?.status ?? "unavailable";
+  }
+  return item.status;
+}
+
+function ambientTranscriptLabel(snapshot: SceneAmbientCaptureResponse | null, channel: "left" | "right") {
+  if (!snapshot) return "等待";
+  const item = findAmbientTranscript(snapshot, channel);
+  if (item) return friendlyStatus(item.status);
+  if (findAmbientTranscript(snapshot, "mono")) return "单声道";
+  return "不可用";
+}
+
+function ambientAudioLevel(snapshot: SceneAmbientCaptureResponse | null, channel: "left" | "right") {
+  if (!snapshot) return "等待录音";
+  const item = findAmbientTranscript(snapshot, channel) ?? findAmbientTranscript(snapshot, "mono");
+  if (!item) return "没有该声道数据";
+  const rms = Number(item.rms);
+  const peak = Number(item.peak);
+  const parts = [];
+  if (Number.isFinite(rms)) parts.push(`RMS ${rms}`);
+  if (Number.isFinite(peak)) parts.push(`Peak ${peak}`);
+  return parts.length ? parts.join(" · ") : item.message || "已采集";
+}
+
+function findAmbientTranscript(snapshot: SceneAmbientCaptureResponse, channel: "left" | "right" | "mono") {
+  return snapshot.transcripts.find((item) => item.channel === channel);
+}
+
+function friendlyAudioChannel(value: string) {
+  const labels: Record<string, string> = {
+    left: "左声道",
+    right: "右声道",
+    mono: "单声道",
+  };
+  return labels[value] ?? value;
+}
+
 function readCameraIndex(snapshot: SceneSensorSnapshotResponse | null) {
   const value = snapshot?.camera?.camera_index;
   const numeric = Number(value);
@@ -724,7 +986,9 @@ function cameraNote(snapshot: SceneSensorSnapshotResponse | null) {
   const camera = snapshot.camera ?? {};
   const workspace = String(camera.workspace_name ?? "");
   const source = String(camera.source ?? "");
-  if (workspace) return `${source || "camera"} · ${workspace}`;
+  const rotation = Number(camera.rotation_degrees);
+  const rotationLabel = Number.isFinite(rotation) && rotation !== 0 ? ` · 旋转 ${rotation}°` : "";
+  if (workspace) return `${source || "camera"} · ${workspace}${rotationLabel}`;
   return String(camera.message ?? source ?? "未获得相机画面");
 }
 

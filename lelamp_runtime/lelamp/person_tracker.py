@@ -8,11 +8,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .motor_control import LELAMP_MOTOR_ORDER, ordered_motor_names, write_goal_position_ordered
+
 
 TRACKING_BACKENDS = ("auto", "face", "hog", "yolo")
 MOTION_MODES = ("head", "all")
 TARGET_POINTS = ("box-center", "person-head", "face-first")
-TRACKING_MOTORS = ("base_yaw", "base_pitch", "elbow_pitch", "wrist_roll", "wrist_pitch")
+TRACKING_MOTORS = LELAMP_MOTOR_ORDER
 _YOLO_MODEL_CACHE: dict[str, Any] = {}
 DEFAULT_POSE_DIR = Path("workspace/.poses")
 
@@ -388,7 +390,7 @@ class LampTargetController:
             limit_min, limit_max = self.motor_limits[motor]
             goal_pos[motor] = clamp_soft_goal(current_value, current_value + delta, limit_min, limit_max)
 
-        self.robot.bus.sync_write("Goal_Position", goal_pos)
+        write_goal_position_ordered(self.robot.bus, goal_pos)
         return {f"{motor}.pos": value for motor, value in goal_pos.items()}
 
 
@@ -504,7 +506,7 @@ def run_home(args: argparse.Namespace) -> int:
                     print(json.dumps({"status": "reached", "step": step_index, "current": current}, ensure_ascii=False))
                     return 0
                 next_pose = interpolate_pose(current, target, max_step=args.max_step)
-                bus.sync_write("Goal_Position", next_pose)
+                write_goal_position_ordered(bus, next_pose)
                 print(json.dumps({"status": "moving", "step": step_index, "target": next_pose}, ensure_ascii=False))
                 time.sleep(args.sleep)
 
@@ -632,7 +634,7 @@ def run_jog(args: argparse.Namespace) -> int:
 
         target = dict(current)
         target[args.motor] = clamp(float(current[args.motor]) + args.delta, -100.0, 100.0)
-        bus.sync_write("Goal_Position", target)
+        write_goal_position_ordered(bus, target)
         print(json.dumps({"status": "sent", "target": target}, ensure_ascii=False))
         time.sleep(args.hold)
         after = bus.sync_read("Present_Position")

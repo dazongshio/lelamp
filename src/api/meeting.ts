@@ -151,14 +151,6 @@ export async function runMeetingStep(
   return { data, source: "api" };
 }
 
-export async function confirmMeetingStep(taskId: string, note = "用户已确认会议步骤。"): Promise<ApiResult<Record<string, unknown>>> {
-  const data = await request<Record<string, unknown>>("/api/meeting/confirm-step", {
-    method: "POST",
-    body: JSON.stringify({ task_id: taskId, note }),
-  });
-  return { data, source: "api" };
-}
-
 export function getMeetingJobs(): Promise<ApiResult<MeetingJobsResponse>> {
   return requestWithMock<MeetingJobsResponse>("/api/meeting/jobs", { items: [], total: 0 });
 }

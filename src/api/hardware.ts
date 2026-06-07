@@ -1,5 +1,5 @@
 import { request, requestWithMock } from "./client";
-import type { ApiResult, HardwareStatus, HardwareTestResponse, LeLampStateResponse } from "./types";
+import type { ApiResult, HardwareStatus, HardwareTestResponse, LeLampMotorControlResponse, LeLampMotorName, LeLampStateResponse } from "./types";
 
 export function getHardwareStatus(): Promise<ApiResult<HardwareStatus>> {
   return requestWithMock<HardwareStatus>("/api/hardware/status", {
@@ -20,6 +20,41 @@ export async function setLeLampState(state: string): Promise<ApiResult<LeLampSta
   const data = await request<LeLampStateResponse>("/api/lelamp/state", {
     method: "POST",
     body: JSON.stringify({ state }),
+  });
+  return { data, source: "api" };
+}
+
+export async function readLeLampMotors(): Promise<ApiResult<LeLampMotorControlResponse>> {
+  const data = await request<LeLampMotorControlResponse>("/api/lelamp/motor-control/read", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  return { data, source: "api" };
+}
+
+export async function moveLeLampMotors(payload: {
+  mode?: "target" | "delta";
+  target?: Partial<Record<LeLampMotorName, number>>;
+  deltas?: Partial<Record<LeLampMotorName, number>>;
+  motor?: LeLampMotorName;
+  delta?: number;
+  max_delta?: number;
+  hold_seconds?: number;
+}): Promise<ApiResult<LeLampMotorControlResponse>> {
+  const data = await request<LeLampMotorControlResponse>("/api/lelamp/motor-control/move", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return { data, source: "api" };
+}
+
+export async function saveLeLampPose(payload: {
+  pose: "default" | "scan" | "projection";
+  motors: Partial<Record<LeLampMotorName, number>>;
+}): Promise<ApiResult<LeLampMotorControlResponse>> {
+  const data = await request<LeLampMotorControlResponse>("/api/lelamp/motor-control/save-pose", {
+    method: "POST",
+    body: JSON.stringify(payload),
   });
   return { data, source: "api" };
 }

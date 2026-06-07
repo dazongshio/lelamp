@@ -139,6 +139,10 @@ class OfficeAgentConfig:
         default_factory=lambda: os.getenv("OPENCLAW_ENABLE_HARDWARE", "0").lower()
         in {"1", "true", "yes", "on"}
     )
+    enable_rgb: bool = field(
+        default_factory=lambda: os.getenv("OPENCLAW_ENABLE_RGB", "0").lower()
+        in {"1", "true", "yes", "on"}
+    )
     hardware_port: str = field(default_factory=lambda: os.getenv("LELAMP_PORT", "/dev/ttyACM0"))
     lamp_id: str = field(default_factory=lambda: os.getenv("LELAMP_ID", "lelamp"))
     projection_dir: Path = field(
@@ -191,6 +195,9 @@ class OfficeAgentConfig:
     mobile_bridge_device_id: str = field(
         default_factory=lambda: os.getenv("OPENCLAW_MOBILE_BRIDGE_DEVICE_ID", "primary_phone")
     )
+    docmost_url: str = field(default_factory=lambda: os.getenv("DOCMOST_URL", ""))
+    docmost_api_key: str = field(default_factory=lambda: os.getenv("DOCMOST_API_KEY", ""))
+    docmost_default_space: str = field(default_factory=lambda: os.getenv("DOCMOST_DEFAULT_SPACE", "General"))
     openai_api_key: str = field(default_factory=lambda: os.getenv("OPENAI_API_KEY", ""))
     openai_base_url: str = field(
         default_factory=lambda: os.getenv("OPENAI_BASE_URL", "https://api.openai.com")
@@ -236,11 +243,26 @@ class OfficeAgentConfig:
     dashscope_vision_wire_api: str = field(
         default_factory=lambda: os.getenv("DASHSCOPE_VISION_WIRE_API", "chat_completions")
     )
+    textin_app_id: str = field(default_factory=lambda: os.getenv("TEXTIN_APP_ID", os.getenv("TEXTIN_X_APP_ID", "")))
+    textin_secret_code: str = field(
+        default_factory=lambda: os.getenv("TEXTIN_SECRET_CODE", os.getenv("TEXTIN_X_SECRET_CODE", ""))
+    )
+    textin_crop_enhance_url: str = field(
+        default_factory=lambda: os.getenv(
+            "TEXTIN_CROP_ENHANCE_URL",
+            "https://api.textin.com/ai/service/v1/crop_enhance_image",
+        )
+    )
+    textin_crop_enhance_mode: int = field(default_factory=lambda: int(os.getenv("TEXTIN_CROP_ENHANCE_MODE", "5")))
+    textin_crop_enabled: bool = field(default_factory=lambda: _env_bool("TEXTIN_CROP_IMAGE", True))
+    textin_dewarp_enabled: bool = field(default_factory=lambda: _env_bool("TEXTIN_DEWARP_IMAGE", True))
+    textin_correct_direction_enabled: bool = field(default_factory=lambda: _env_bool("TEXTIN_CORRECT_DIRECTION", True))
+    textin_timeout_seconds: int = field(default_factory=lambda: int(os.getenv("TEXTIN_TIMEOUT_SECONDS", "90")))
     dashscope_text_model: str = field(
         default_factory=lambda: os.getenv("DASHSCOPE_TEXT_MODEL", "qwen-plus")
     )
     dashscope_realtime_model: str = field(
-        default_factory=lambda: os.getenv("DASHSCOPE_REALTIME_MODEL", "qwen3-omni-flash-realtime")
+        default_factory=lambda: os.getenv("DASHSCOPE_REALTIME_MODEL", "qwen3.5-omni-plus-realtime")
     )
     dashscope_realtime_url: str = field(
         default_factory=lambda: os.getenv(
@@ -249,7 +271,7 @@ class OfficeAgentConfig:
         )
     )
     dashscope_realtime_voice: str = field(
-        default_factory=lambda: os.getenv("DASHSCOPE_REALTIME_VOICE", "Cherry")
+        default_factory=lambda: os.getenv("DASHSCOPE_REALTIME_VOICE", "Tina")
     )
     dashscope_realtime_transcription_model: str = field(
         default_factory=lambda: os.getenv(
@@ -290,6 +312,51 @@ class OfficeAgentConfig:
     )
     tingwu_language_hints: str = field(default_factory=lambda: os.getenv("TINGWU_LANGUAGE_HINTS", "cn,en"))
     tingwu_analysis_model: str = field(default_factory=lambda: os.getenv("TINGWU_ANALYSIS_MODEL", "default"))
+    tingwu_translation_enabled: bool = field(
+        default_factory=lambda: _env_bool("TINGWU_TRANSLATION_ENABLED", False)
+    )
+    tingwu_translation_target_lang: str = field(
+        default_factory=lambda: os.getenv("TINGWU_TRANSLATION_TARGET_LANG", os.getenv("TINGWU_TRANSLATION_TARGET_LANGS", ""))
+    )
+    tingwu_phrase_id: str = field(
+        default_factory=lambda: os.getenv("TINGWU_PHRASE_ID", os.getenv("TINGWU_HOT_WORD_PHRASE_ID", ""))
+    )
+    tingwu_hot_words: str = field(
+        default_factory=lambda: os.getenv("TINGWU_HOT_WORDS", os.getenv("TINGWU_HOTWORDS", ""))
+    )
+    tingwu_audio_channel_mode: str = field(default_factory=lambda: os.getenv("TINGWU_AUDIO_CHANNEL_MODE", ""))
+    tingwu_key_information_enabled: bool = field(
+        default_factory=lambda: _env_bool("TINGWU_KEY_INFORMATION_ENABLED", True)
+    )
+    tingwu_actions_enabled: bool = field(default_factory=lambda: _env_bool("TINGWU_ACTIONS_ENABLED", True))
+    tingwu_full_summary_enabled: bool = field(
+        default_factory=lambda: _env_bool("TINGWU_FULL_SUMMARY_ENABLED", True)
+    )
+    tingwu_conversational_enabled: bool = field(
+        default_factory=lambda: _env_bool("TINGWU_CONVERSATIONAL_ENABLED", True)
+    )
+    tingwu_questions_answering_enabled: bool = field(
+        default_factory=lambda: _env_bool("TINGWU_QUESTIONS_ANSWERING_ENABLED", True)
+    )
+    tingwu_mind_map_enabled: bool = field(default_factory=lambda: _env_bool("TINGWU_MIND_MAP_ENABLED", True))
+    tingwu_mind_map_format: str = field(default_factory=lambda: os.getenv("TINGWU_MIND_MAP_FORMAT", "timestamp"))
+    tingwu_ppt_extraction_enabled: bool = field(
+        default_factory=lambda: _env_bool("TINGWU_PPT_EXTRACTION_ENABLED", True)
+    )
+    tingwu_auto_chapters_enabled: bool = field(
+        default_factory=lambda: _env_bool("TINGWU_AUTO_CHAPTERS_ENABLED", True)
+    )
+    tingwu_auto_chapter_granularity: str = field(default_factory=lambda: os.getenv("TINGWU_AUTO_CHAPTER_GRANULARITY", "Coarse"))
+    tingwu_auto_chapter_title_length_level: str = field(
+        default_factory=lambda: os.getenv("TINGWU_AUTO_CHAPTER_TITLE_LENGTH_LEVEL", "Short")
+    )
+    tingwu_text_polish_enabled: bool = field(default_factory=lambda: _env_bool("TINGWU_TEXT_POLISH_ENABLED", True))
+    tingwu_custom_prompt_enabled: bool = field(
+        default_factory=lambda: _env_bool("TINGWU_CUSTOM_PROMPT_ENABLED", False)
+    )
+    tingwu_custom_prompt_model: str = field(default_factory=lambda: os.getenv("TINGWU_CUSTOM_PROMPT_MODEL", "tingwu-turbo"))
+    tingwu_custom_prompt_trans_type: str = field(default_factory=lambda: os.getenv("TINGWU_CUSTOM_PROMPT_TRANS_TYPE", "chat"))
+    tingwu_custom_prompt: str = field(default_factory=lambda: os.getenv("TINGWU_CUSTOM_PROMPT", ""))
     tingwu_mock: bool = field(
         default_factory=lambda: os.getenv("TINGWU_MOCK", "0").lower() in {"1", "true", "yes", "on"}
     )
@@ -348,6 +415,8 @@ class OfficeAgentConfig:
         dashscope_api_key = self.dashscope_api_key if cloud_ai_enabled else ""
         groq_api_key = self.groq_api_key if cloud_ai_enabled else ""
         elevenlabs_api_key = self.elevenlabs_api_key if cloud_ai_enabled else ""
+        textin_app_id = self.textin_app_id.strip() if cloud_ai_enabled else ""
+        textin_secret_code = self.textin_secret_code.strip() if cloud_ai_enabled else ""
         raw_tingwu_api_key = self.tingwu_api_key or dashscope_api_key or os.getenv("DASHSCOPE_API_KEY", "")
         raw_tingwu_app_id = self.tingwu_app_id or os.getenv("TINGWU_APP_ID", "") or os.getenv("TINGWU_MEETING_APP_ID", "")
         tingwu_api_key = _real_tingwu_credential(
@@ -383,6 +452,9 @@ class OfficeAgentConfig:
             mobile_bridge_webhook_url=self.mobile_bridge_webhook_url,
             mobile_bridge_shared_secret=self.mobile_bridge_shared_secret,
             mobile_bridge_device_id=self.mobile_bridge_device_id,
+            docmost_url=self.docmost_url.rstrip("/"),
+            docmost_api_key=self.docmost_api_key.strip(),
+            docmost_default_space=self.docmost_default_space.strip() or "General",
             openai_api_key=openai_api_key,
             openai_base_url=self.openai_base_url.rstrip("/"),
             openai_model=self.openai_model,
@@ -406,6 +478,14 @@ class OfficeAgentConfig:
             dashscope_vision_model=self.dashscope_vision_model,
             dashscope_vision_base_url=self.dashscope_vision_base_url.rstrip("/"),
             dashscope_vision_wire_api=self.dashscope_vision_wire_api,
+            textin_app_id=textin_app_id,
+            textin_secret_code=textin_secret_code,
+            textin_crop_enhance_url=self.textin_crop_enhance_url.rstrip("/"),
+            textin_crop_enhance_mode=max(1, min(5, int(self.textin_crop_enhance_mode))),
+            textin_crop_enabled=self.textin_crop_enabled,
+            textin_dewarp_enabled=self.textin_dewarp_enabled,
+            textin_correct_direction_enabled=self.textin_correct_direction_enabled,
+            textin_timeout_seconds=max(5, int(self.textin_timeout_seconds)),
             dashscope_text_model=self.dashscope_text_model,
             dashscope_realtime_model=self.dashscope_realtime_model,
             dashscope_realtime_url=self.dashscope_realtime_url.rstrip("/"),
@@ -426,6 +506,27 @@ class OfficeAgentConfig:
             tingwu_transcription_model=self.tingwu_transcription_model,
             tingwu_language_hints=self.tingwu_language_hints,
             tingwu_analysis_model=self.tingwu_analysis_model,
+            tingwu_translation_enabled=self.tingwu_translation_enabled,
+            tingwu_translation_target_lang=self.tingwu_translation_target_lang,
+            tingwu_phrase_id=self.tingwu_phrase_id.strip(),
+            tingwu_hot_words=self.tingwu_hot_words,
+            tingwu_audio_channel_mode=self.tingwu_audio_channel_mode,
+            tingwu_key_information_enabled=self.tingwu_key_information_enabled,
+            tingwu_actions_enabled=self.tingwu_actions_enabled,
+            tingwu_full_summary_enabled=self.tingwu_full_summary_enabled,
+            tingwu_conversational_enabled=self.tingwu_conversational_enabled,
+            tingwu_questions_answering_enabled=self.tingwu_questions_answering_enabled,
+            tingwu_mind_map_enabled=self.tingwu_mind_map_enabled,
+            tingwu_mind_map_format=self.tingwu_mind_map_format,
+            tingwu_ppt_extraction_enabled=self.tingwu_ppt_extraction_enabled,
+            tingwu_auto_chapters_enabled=self.tingwu_auto_chapters_enabled,
+            tingwu_auto_chapter_granularity=self.tingwu_auto_chapter_granularity,
+            tingwu_auto_chapter_title_length_level=self.tingwu_auto_chapter_title_length_level,
+            tingwu_text_polish_enabled=self.tingwu_text_polish_enabled,
+            tingwu_custom_prompt_enabled=self.tingwu_custom_prompt_enabled,
+            tingwu_custom_prompt_model=self.tingwu_custom_prompt_model,
+            tingwu_custom_prompt_trans_type=self.tingwu_custom_prompt_trans_type,
+            tingwu_custom_prompt=self.tingwu_custom_prompt,
             tingwu_mock=self.tingwu_mock,
             mic_device=(self.mic_device.strip() or "auto"),
             mic_rate=self.mic_rate,

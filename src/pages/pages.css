@@ -706,6 +706,35 @@
   gap: 8px;
 }
 
+.tingwu-capability-grid {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tingwu-capability {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  padding: 5px 8px;
+  font-size: 0.82rem;
+  color: var(--color-muted);
+  background: rgba(255, 255, 255, 0.64);
+}
+
+.tingwu-capability--on {
+  color: var(--color-primary);
+  border-color: rgba(37, 99, 235, 0.32);
+  background: var(--color-primary-soft);
+}
+
+.tingwu-capability--off {
+  opacity: 0.66;
+}
+
 .meeting-hero .meeting-card-actions {
   justify-content: flex-start;
   margin-top: 0;
@@ -836,6 +865,489 @@
   min-width: 0;
 }
 
+.meeting-workbench {
+  gap: 16px;
+}
+
+.meeting-console {
+  display: grid;
+  grid-template-columns: minmax(0, 1.36fr) minmax(340px, 0.64fr);
+  gap: 14px;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.meeting-console__primary .card__body,
+.meeting-console__side .card__body {
+  display: grid;
+  gap: 14px;
+}
+
+.meeting-card-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.meeting-card-title svg {
+  color: var(--color-primary);
+  flex: 0 0 auto;
+}
+
+.meeting-console-status {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+
+.meeting-status-tile {
+  min-height: 82px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: rgba(255, 255, 255, 0.82);
+  display: grid;
+  align-content: center;
+  gap: 5px;
+  padding: 11px 12px;
+  min-width: 0;
+}
+
+.meeting-status-tile span,
+.meeting-provider-summary span {
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.meeting-status-tile strong {
+  font-size: 18px;
+  line-height: 1.15;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.meeting-status-tile small {
+  color: var(--color-subtle);
+  font-size: 11px;
+  line-height: 1.25;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.meeting-command-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.meeting-command-row button {
+  min-width: 0;
+}
+
+.meeting-provider-summary {
+  display: grid;
+  gap: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: rgba(255, 255, 255, 0.78);
+  overflow: hidden;
+}
+
+.meeting-provider-summary div {
+  min-height: 46px;
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--color-border-soft);
+  min-width: 0;
+}
+
+.meeting-provider-summary div:last-child {
+  border-bottom: 0;
+}
+
+.meeting-provider-summary strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.meeting-side-actions {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.meeting-section-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.meeting-section-heading span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--color-gray-soft);
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.meeting-section-heading strong {
+  font-size: 14px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.meeting-process-panel {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: rgba(255, 255, 255, 0.82);
+  padding: 12px;
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.meeting-process-panel .meeting-progress-list {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  min-width: 0;
+  scrollbar-width: thin;
+}
+
+.meeting-process-panel .meeting-progress-list::-webkit-scrollbar {
+  height: 8px;
+}
+
+.meeting-process-panel .meeting-progress-list::-webkit-scrollbar-thumb {
+  background: rgba(142, 142, 147, 0.28);
+  border-radius: 999px;
+}
+
+.meeting-process-panel .meeting-progress-item {
+  width: clamp(190px, 16vw, 236px);
+  flex: 0 0 auto;
+  background: rgba(255, 255, 255, 0.84);
+  min-height: 58px;
+  padding: 9px;
+  grid-template-columns: 28px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  gap: 6px 9px;
+  box-shadow: none;
+}
+
+.meeting-process-panel .meeting-progress-item strong {
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.meeting-process-panel .meeting-progress-item .status-badge {
+  grid-column: 2;
+  width: fit-content;
+}
+
+.meeting-process-panel .meeting-progress-item--active {
+  background: rgba(0, 122, 255, 0.08);
+}
+
+.meeting-main-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.72fr) minmax(340px, 0.9fr);
+  align-items: stretch;
+}
+
+.tingwu-capability-grid--compact {
+  margin-top: 0;
+  max-height: 132px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.meeting-action-strip {
+  padding: 12px;
+  backdrop-filter: none;
+}
+
+.meeting-results {
+  grid-template-columns: minmax(0, 1.15fr) minmax(340px, 0.85fr);
+}
+
+.meeting-results .card:first-child,
+.meeting-results .card:nth-child(2) {
+  min-height: 220px;
+}
+
+.meeting-app-shell {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.62fr) minmax(0, 1.7fr) minmax(320px, 0.84fr);
+  gap: 14px;
+  align-items: start;
+  min-width: 0;
+}
+
+.meeting-app-sidebar,
+.meeting-live-pane,
+.meeting-ai-pane,
+.meeting-inline-panel,
+.meeting-transcript-panel,
+.meeting-email-panel {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: rgba(255, 255, 255, 0.9);
+  min-width: 0;
+}
+
+.meeting-app-sidebar,
+.meeting-ai-pane {
+  position: sticky;
+  top: 12px;
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  max-height: calc(100vh - 150px);
+  overflow: auto;
+}
+
+.meeting-live-pane {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+}
+
+.meeting-pane-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.meeting-pane-header > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.meeting-pane-header span {
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.meeting-pane-header strong,
+.meeting-pane-header h2 {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.meeting-pane-header h2 {
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.meeting-list {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.meeting-list-item {
+  width: 100%;
+  display: grid;
+  gap: 5px;
+  align-items: start;
+  text-align: left;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: rgba(255, 255, 255, 0.74);
+  color: var(--color-text);
+  padding: 10px;
+  min-width: 0;
+}
+
+.meeting-list-item strong,
+.meeting-list-item span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.meeting-list-item > span {
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.meeting-list-item .status-badge {
+  width: fit-content;
+}
+
+.meeting-list-item--active {
+  border-color: rgba(0, 122, 255, 0.36);
+  background: rgba(0, 122, 255, 0.08);
+}
+
+.meeting-empty-state {
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-control);
+  color: var(--color-muted);
+  padding: 12px;
+  text-align: center;
+}
+
+.meeting-sidebar-section {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.meeting-sidebar-section .tingwu-capability-grid {
+  max-height: 180px;
+}
+
+.meeting-live-topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.meeting-live-topbar > div:first-child {
+  min-width: 0;
+}
+
+.meeting-live-topbar span {
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.meeting-live-topbar h2 {
+  margin: 3px 0 0;
+  font-size: 20px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.meeting-live-badges {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.meeting-app-status {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.meeting-live-form {
+  grid-template-columns: minmax(0, 1.25fr) minmax(220px, 0.75fr);
+}
+
+.meeting-live-actions {
+  padding-bottom: 2px;
+}
+
+.meeting-transcript-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.realtime-transcript--app {
+  min-height: 320px;
+  max-height: 46vh;
+  background: #fbfcfd;
+}
+
+.meeting-lower-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 1fr);
+  gap: 14px;
+  min-width: 0;
+}
+
+.meeting-inline-panel {
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.meeting-ai-pane {
+  align-self: start;
+}
+
+.meeting-insight-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  min-width: 0;
+}
+
+.meeting-insight-tabs button {
+  min-height: 32px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: rgba(255, 255, 255, 0.74);
+  color: var(--color-muted);
+  font-weight: 700;
+  padding: 0 8px;
+  white-space: nowrap;
+}
+
+.meeting-insight-tabs button.selected {
+  border-color: rgba(0, 122, 255, 0.34);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.meeting-insight-panel {
+  min-height: 240px;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: #fbfcfd;
+  padding: 12px;
+  overflow: auto;
+}
+
+.meeting-insight-panel p {
+  margin: 0;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.meeting-ai-actions,
+.meeting-email-panel,
+.meeting-wiki-actions {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.meeting-email-panel {
+  padding: 12px;
+}
+
+.meeting-wiki-actions {
+  border-top: 1px solid var(--color-border);
+  padding-top: 10px;
+}
+
 .mini-table-wrap {
   overflow: auto;
 }
@@ -843,6 +1355,54 @@
 .meeting-output-list {
   display: grid;
   gap: 8px;
+}
+
+.meeting-artifact-list {
+  align-content: start;
+}
+
+.meeting-artifact-button {
+  width: 100%;
+  border: 1px solid var(--color-border);
+  background: #fff;
+  color: var(--color-text);
+  cursor: pointer;
+  min-height: 38px;
+  text-align: left;
+}
+
+.meeting-artifact-button:hover {
+  border-color: rgba(0, 122, 255, 0.32);
+  background: var(--color-primary-soft);
+}
+
+.meeting-artifact-button small {
+  margin-left: auto;
+  color: var(--color-muted);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.meeting-artifact-preview {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--color-border);
+  padding-top: 10px;
+  min-width: 0;
+}
+
+.meeting-artifact-preview__text {
+  max-height: 300px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: #f7f8fa;
+  padding: 10px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #243040;
 }
 
 .office-api-card {
@@ -1364,25 +1924,340 @@
   white-space: pre-wrap;
 }
 
-.doc-preview {
-  background: linear-gradient(180deg, rgba(246, 247, 249, 0.96), rgba(234, 237, 241, 0.86));
-  border-radius: var(--radius-card);
-  padding: 18px;
-  height: 380px;
-  overflow: auto;
-  border: 1px solid var(--color-border-soft);
+.document-command-strip {
+  display: grid;
+  grid-template-columns: auto minmax(240px, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
 }
 
-.doc-page {
-  width: min(86%, 560px);
-  min-height: 500px;
-  margin: 0 auto;
-  padding: 44px 36px;
+.document-source-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.document-source-tabs button {
+  min-height: 32px;
+  border: 0;
+  border-radius: calc(var(--radius-control) - 3px);
+  background: transparent;
+  color: var(--color-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.document-source-tabs button.selected {
   background: var(--color-card-solid);
-  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.12);
-  text-align: center;
+  color: var(--color-primary);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+}
+
+.document-file-select {
+  min-width: 0;
+}
+
+.selected-file--compact {
+  margin-top: 10px;
+  padding: 10px 12px;
+}
+
+.document-action-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.document-status-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-top: 10px;
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
+.document-status-line span:last-child {
+  overflow-wrap: anywhere;
+}
+
+.document-result-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.document-result-summary > div {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: rgba(255, 255, 255, 0.72);
+  padding: 10px;
+  display: grid;
+  gap: 4px;
+}
+
+.document-result-summary span {
+  color: var(--color-muted);
   font-size: 12px;
-  border-radius: 4px;
+}
+
+.document-artifact-list {
+  display: grid;
+  gap: 8px;
+}
+
+.document-artifact-button {
+  width: 100%;
+  min-height: 38px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 0.42fr) minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  text-align: left;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: #ffffff;
+  color: var(--color-text);
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.document-artifact-button:hover,
+.document-artifact-button.selected {
+  border-color: rgba(0, 122, 255, 0.32);
+  background: var(--color-primary-soft);
+}
+
+.document-artifact-button span,
+.document-artifact-button small {
+  overflow-wrap: anywhere;
+}
+
+.document-artifact-button small {
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.wiki-page {
+  max-width: 980px;
+}
+
+.button-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.wiki-sync-guide {
+  display: grid;
+  gap: 10px;
+}
+
+.wiki-sync-guide > div {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 10px;
+  align-items: start;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  padding: 10px;
+}
+
+.wiki-sync-guide svg {
+  grid-row: span 2;
+  color: var(--color-primary);
+}
+
+.wiki-sync-guide span {
+  color: var(--color-muted);
+  overflow-wrap: anywhere;
+}
+
+.compact-details {
+  margin-top: 10px;
+}
+
+.workspace-file-viewer {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.workspace-file-viewer__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.workspace-file-viewer__identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: min(100%, 240px);
+  color: var(--color-primary);
+}
+
+.workspace-file-viewer__identity > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.workspace-file-viewer__identity span {
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.workspace-file-viewer__identity strong {
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.workspace-file-viewer__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.workspace-file-viewer__link {
+  min-height: 30px;
+  padding: 0 10px;
+}
+
+.workspace-file-viewer__body {
+  min-height: 420px;
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-card);
+  background: #f7f8fa;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.workspace-file-viewer--compact {
+  gap: 8px;
+}
+
+.workspace-file-viewer--compact .workspace-file-viewer__identity svg {
+  display: none;
+}
+
+.workspace-file-viewer--compact .workspace-file-viewer__body {
+  min-height: 320px;
+}
+
+.workspace-file-viewer--compact .workspace-file-viewer__frame {
+  min-height: 380px;
+  height: min(58vh, 620px);
+}
+
+.workspace-file-viewer--compact .workspace-file-viewer__text,
+.workspace-file-viewer--compact .workspace-file-viewer__markdown,
+.workspace-file-viewer--compact .workspace-file-viewer__office,
+.workspace-file-viewer--compact .workspace-file-viewer__empty {
+  min-height: 320px;
+  max-height: min(58vh, 620px);
+}
+
+.workspace-file-viewer__frame {
+  display: block;
+  width: 100%;
+  height: min(72vh, 760px);
+  min-height: 520px;
+  border: 0;
+  background: #ffffff;
+}
+
+.workspace-file-viewer__image {
+  display: block;
+  width: 100%;
+  max-height: min(72vh, 760px);
+  object-fit: contain;
+  background: #111827;
+}
+
+.workspace-file-viewer__text,
+.workspace-file-viewer__markdown,
+.workspace-file-viewer__office {
+  min-height: 420px;
+  max-height: min(72vh, 760px);
+  overflow: auto;
+  margin: 0;
+  padding: 18px;
+  background: #ffffff;
+  color: #243040;
+}
+
+.workspace-file-viewer__text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.workspace-file-viewer__office {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+
+.workspace-file-viewer__office .workspace-file-viewer__text {
+  min-height: 340px;
+  max-height: none;
+  padding: 0;
+  background: transparent;
+}
+
+.workspace-file-viewer__markdown {
+  line-height: 1.7;
+}
+
+.workspace-file-viewer__markdown h2,
+.workspace-file-viewer__markdown h3,
+.workspace-file-viewer__markdown h4,
+.workspace-file-viewer__markdown h5 {
+  margin: 0 0 10px;
+  color: var(--color-text);
+}
+
+.workspace-file-viewer__markdown p,
+.workspace-file-viewer__markdown ul {
+  margin: 0 0 10px;
+}
+
+.workspace-file-viewer__markdown ul {
+  padding-left: 20px;
+}
+
+.workspace-file-viewer__empty {
+  min-height: 420px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  padding: 24px;
+  text-align: center;
+  color: var(--color-muted);
+  background: #ffffff;
 }
 
 .risk-list {
@@ -1620,6 +2495,57 @@
   margin-bottom: 12px;
 }
 
+.scene-actions--compact {
+  margin-bottom: 10px;
+}
+
+.segmented-control {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.segmented-control button {
+  min-height: 28px;
+  border: 0;
+  border-radius: calc(var(--radius-control) - 3px);
+  background: transparent;
+  color: var(--color-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.segmented-control button.selected {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.scene-camera-mode-toggle {
+  flex: 0 0 auto;
+}
+
+.scene-toggle-control {
+  min-height: 36px;
+  padding: 7px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--color-text);
+}
+
+.scene-toggle-control svg {
+  color: var(--color-primary);
+}
+
 .scene-sensor-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
@@ -1662,6 +2588,10 @@
   margin-bottom: 12px;
 }
 
+.scene-camera-preview--inline {
+  min-height: 360px;
+}
+
 .scene-camera-preview img {
   display: block;
   width: 100%;
@@ -1669,6 +2599,25 @@
   min-height: 300px;
   object-fit: contain;
   background: #0f172a;
+}
+
+.scene-camera-preview--inline img {
+  height: min(54vw, 560px);
+  min-height: 360px;
+}
+
+.scene-live-camera-panel {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.scene-live-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .scene-camera-placeholder {
@@ -1683,6 +2632,94 @@
 .scene-camera-placeholder span {
   color: rgba(255, 255, 255, 0.64);
   font-size: 13px;
+}
+
+.scene-camera-pair-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.scene-camera-frame {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.scene-camera-frame img,
+.scene-camera-frame__empty {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: #0f172a;
+}
+
+.scene-camera-frame img {
+  display: block;
+  object-fit: contain;
+}
+
+.camera-rotated-180 {
+  transform: rotate(180deg);
+}
+
+.scene-camera-frame__empty {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  color: rgba(255, 255, 255, 0.72);
+  text-align: center;
+  padding: 18px;
+}
+
+.scene-chat-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.scene-chat-list .scene-camera-placeholder {
+  color: var(--color-muted);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-control);
+  background: #f7f8fa;
+}
+
+.scene-chat-list .scene-camera-placeholder span {
+  color: var(--color-muted);
+}
+
+.scene-chat-bubble {
+  display: grid;
+  gap: 8px;
+  width: min(720px, 86%);
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: #f7f8fa;
+}
+
+.scene-chat-bubble--right {
+  justify-self: end;
+  background: #e8f7e8;
+  border-color: rgba(30, 160, 80, 0.24);
+}
+
+.scene-chat-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-muted);
+  font-size: 0.84rem;
+}
+
+.scene-chat-bubble p {
+  margin: 0;
+  color: var(--color-text);
+  line-height: 1.55;
 }
 
 .environment-form {
@@ -1862,7 +2899,8 @@
 
 .voice-status-grid,
 .voice-capture-form,
-.voice-conversation-form {
+.voice-conversation-form,
+.lamp-command-form {
   display: grid;
   gap: 10px;
   min-width: 0;
@@ -1886,7 +2924,8 @@
 }
 
 .voice-capture-form label:not(.inline-check),
-.voice-conversation-form label:not(.inline-check) {
+.voice-conversation-form label:not(.inline-check),
+.lamp-command-form label:not(.inline-check) {
   display: grid;
   gap: 6px;
   color: var(--color-muted);
@@ -1903,6 +2942,93 @@
 .voice-conversation-form textarea {
   min-height: 92px;
   resize: vertical;
+}
+
+.lamp-command-form {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  margin-bottom: 12px;
+}
+
+.lamp-command-form textarea {
+  min-height: 76px;
+  resize: vertical;
+}
+
+.lamp-command-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.lamp-command-actions button {
+  min-height: 34px;
+}
+
+.motor-control-table {
+  display: grid;
+  gap: 8px;
+}
+
+.motor-pose-save-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-bottom: 10px;
+}
+
+.motor-pose-save-strip button {
+  min-height: 34px;
+}
+
+.motor-control-table__header,
+.motor-control-row {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.8fr) minmax(82px, 0.58fr) minmax(96px, 0.64fr) minmax(112px, 0.68fr) minmax(150px, 0.94fr) minmax(150px, 0.94fr) minmax(150px, 0.94fr) minmax(210px, 1.18fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.motor-control-table__header {
+  color: var(--color-muted);
+  font-size: 0.82rem;
+}
+
+.motor-control-row {
+  padding: 8px 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.motor-current-value {
+  font-variant-numeric: tabular-nums;
+}
+
+.motor-control-actions {
+  gap: 6px;
+}
+
+.motor-control-actions button {
+  min-height: 34px;
+}
+
+.motor-pose-cell {
+  display: grid;
+  grid-template-columns: minmax(76px, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.motor-pose-cell .input {
+  width: 100%;
+  min-width: 0;
+}
+
+.motor-pose-cell button {
+  min-height: 32px;
+  padding-inline: 10px;
 }
 
 .voice-result-preview {
@@ -2074,6 +3200,22 @@
 }
 
 @media (max-width: 1120px) {
+  .meeting-app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .meeting-app-sidebar,
+  .meeting-ai-pane {
+    position: static;
+    max-height: none;
+  }
+
+  .meeting-console,
+  .meeting-main-grid,
+  .meeting-results {
+    grid-template-columns: 1fr;
+  }
+
   .meeting-overview,
   .meeting-workflow-panel,
   .meeting-results {
@@ -2102,8 +3244,18 @@
 }
 
 @media (max-width: 980px) {
+  .meeting-lower-grid,
+  .meeting-live-form {
+    grid-template-columns: 1fr;
+  }
+
+  .meeting-console-status {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .shared-top,
   .projection-top,
+  .document-command-strip,
   .scan-controls,
   .settings-summary,
   .meeting-overview,
@@ -2134,6 +3286,7 @@
   .validation-layout,
   .validation-steps,
   .display-profile-grid,
+  .scene-camera-pair-grid,
   .scene-workflow-grid,
   .scene-event-list,
   .skill-grid {
@@ -2142,6 +3295,43 @@
 }
 
 @media (max-width: 760px) {
+  .meeting-app-sidebar,
+  .meeting-live-pane,
+  .meeting-ai-pane {
+    padding: 10px;
+  }
+
+  .meeting-console-status,
+  .meeting-provider-summary div {
+    grid-template-columns: 1fr;
+  }
+
+  .meeting-command-row,
+  .meeting-side-actions,
+  .meeting-live-topbar {
+    justify-content: stretch;
+  }
+
+  .meeting-live-topbar {
+    flex-direction: column;
+  }
+
+  .meeting-insight-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .meeting-command-row button,
+  .meeting-side-actions button,
+  .meeting-action-strip button,
+  .meeting-ai-actions button,
+  .meeting-email-panel button {
+    width: 100%;
+  }
+
+  .meeting-process-panel .meeting-progress-item {
+    width: min(82vw, 260px);
+  }
+
   .assistant-page-grid,
   .execution-grid {
     grid-template-columns: 1fr;
@@ -2181,13 +3371,20 @@
   .realtime-monitor,
   .local-realtime-form,
   .environment-form,
-  .voice-conversation-form {
+  .voice-conversation-form,
+  .lamp-command-form {
     grid-template-columns: 1fr;
   }
 
-  .doc-page {
+  .document-action-row button,
+  .document-source-tabs,
+  .document-source-tabs button {
     width: 100%;
-    padding: 28px 20px;
+  }
+
+  .document-source-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
   }
 
   .cue-buttons,
@@ -2197,6 +3394,7 @@
   .validation-layout,
   .validation-steps,
   .display-profile-grid,
+  .scene-camera-pair-grid,
   .scene-workflow-grid,
   .scene-event-list,
   .voice-status-row,
