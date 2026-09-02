@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AI Projector Console - Result Center</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body data-page="results">
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand"><div class="brand-mark">AI</div><div><strong>AI Projector</strong><span>树莓派 AI 服务控制台</span></div></div>
+        <nav class="nav-group">
+          <span class="nav-title">工作区</span>
+          <a class="nav-link" href="./index.html" data-page-link="today"><span class="nav-dot">1</span>Today Workspace</a>
+          <a class="nav-link" href="./meeting.html" data-page-link="meeting"><span class="nav-dot">2</span>Meeting Mode</a>
+          <a class="nav-link" href="./documents.html" data-page-link="documents"><span class="nav-dot">3</span>Document Workspace</a>
+          <a class="nav-link" href="./results.html" data-page-link="results"><span class="nav-dot">4</span>Result Center</a>
+        </nav>
+        <div class="sidebar-note"><strong>结果策略</strong><span>生成结果先预览，再归档；敏感动作进入授权面板。</span></div>
+      </aside>
+      <main class="main">
+        <div class="topbar">
+          <div class="topline"><span class="topline-dot"></span><div><strong>Result Center</strong><span>Generated artifacts archive</span></div></div>
+          <div class="topbar-spacer"></div>
+          <span class="status ok">Preview drawer</span>
+          <span class="status ok">Detail page</span>
+          <span class="status warn">授权面板</span>
+        </div>
+
+        <header class="page-head">
+          <div>
+            <h1>结果中心</h1>
+            <p>集中归档会议纪要、文档摘要、合同表格、邮件草稿和扫描文件。轻量结果用 Preview drawer，复杂结果进入 Detail page。</p>
+          </div>
+          <div class="actions">
+            <button class="btn">Filter results</button>
+            <button class="btn primary">Open result details</button>
+          </div>
+        </header>
+
+        <section class="grid results">
+          <main class="grid">
+            <article class="panel">
+              <div class="panel-head"><div><h2>归档结果</h2><span>Generated artifacts from Raspberry Pi shared space</span></div><span class="status ok">Result Center</span></div>
+              <div class="panel-body artifact-list">
+                <div class="artifact-row">
+                  <div><strong>会议纪要 - LeLamp 实时会议</strong><span>minutes.md / 09:36 / 来自实时转写</span></div>
+                  <button class="btn" data-preview-target="#detail">Preview</button>
+                </div>
+                <div class="artifact-row">
+                  <div><strong>合同表格 - projector_contract_scan</strong><span>contract-table.csv / 09:42 / 来自 OCR</span></div>
+                  <button class="btn" data-preview-target="#detail">Open result details</button>
+                </div>
+                <div class="artifact-row">
+                  <div><strong>邮件草稿 - 会后跟进</strong><span>draft.eml / 09:45 / 等待授权</span></div>
+                  <span class="status warn">needs authorization</span>
+                </div>
+                <div class="artifact-row">
+                  <div><strong>扫描文件归档 - lamp_head_scan.pdf</strong><span>scan.pdf / 09:51 / 文档扫描</span></div>
+                  <button class="btn">Open original</button>
+                </div>
+              </div>
+            </article>
+
+            <article class="panel result-detail" id="detail">
+              <div class="panel-head"><div><h2>Detail page</h2><span>复杂结果详情</span></div><button class="btn">Save to shared space</button></div>
+              <div class="panel-body detail-sheet">
+                <h2>会议纪要</h2>
+                <p><strong>摘要：</strong>本次会议确认 AI 投影设备的总助手运行在树莓派，树莓派共享空间是文件桥，LAN 电脑只作为可选 SSH 控制目标。</p>
+                <p><strong>决策：</strong>默认沙箱控制；全权控制必须显式请求、可撤销、并写入审计。</p>
+                <table class="table">
+                  <thead><tr><th>行动项</th><th>负责人</th><th>状态</th></tr></thead>
+                  <tbody>
+                    <tr><td>完善文档工作区</td><td>Design</td><td>In progress</td></tr>
+                    <tr><td>补充授权面板</td><td>Product</td><td>Ready</td></tr>
+                    <tr><td>检查静态页面</td><td>QA</td><td>Pending</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </article>
+          </main>
+
+          <aside class="inspector preview-drawer">
+            <article class="panel">
+              <div class="panel-head"><h3>Preview drawer</h3><span>轻量结果</span></div>
+              <div class="panel-body row-list">
+                <div class="result-card"><strong>文档摘要</strong><span>沙箱控制下生成，不影响电脑桌面。</span></div>
+                <div class="result-card"><strong>合同风险</strong><span>付款期限、保密条款和终止条件需要复核。</span></div>
+                <div class="result-card"><strong>扫描归档</strong><span>PDF 已保存回树莓派共享空间。</span></div>
+              </div>
+            </article>
+            <article class="panel">
+              <div class="panel-head"><h3>授权面板</h3><span>Sensitive actions</span></div>
+              <div class="panel-body row-list">
+                <div class="danger-note">发送邮件、导出外部文件、或通过 SSH 控制电脑前，需要明确授权。系统记录请求人、来源、时间和结果。</div>
+                <button class="btn danger">授权发送邮件草稿</button>
+                <button class="btn">View audit</button>
+              </div>
+            </article>
+            <article class="panel">
+              <div class="panel-head"><h3>共享审计</h3><span>Audit trail</span></div>
+              <div class="panel-body audit-strip">
+                <span class="chip">生成纪要</span>
+                <span class="chip">保存表格</span>
+                <span class="chip">预览结果</span>
+                <span class="chip">导出待授权</span>
+              </div>
+            </article>
+          </aside>
+        </section>
+      </main>
+    </div>
+    <script src="./app.js"></script>
+  </body>
+</html>

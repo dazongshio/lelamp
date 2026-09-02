@@ -23,6 +23,7 @@ interface AssistantPanelProps {
 function directReplyAttachment(kind: string): string {
   if (kind === "lamp_control") return "本地台灯控制 · 未调用 Qwen";
   if (kind === "meeting_control") return "本地会议控制 · 未调用 Qwen";
+  if (kind === "remote_control") return "本地远程电脑控制 · 未调用 Qwen";
   return "直接回复 · 未触发本地任务";
 }
 

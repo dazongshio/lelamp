@@ -2,8 +2,19 @@ import { Lightbulb, Mic, Radio, RefreshCw, Send, Speaker, Speech, Volume2, Waves
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useState } from "react";
 import { apiErrorMessage } from "../api/client";
-import { getVoiceStatus, postVoiceCaptureOnce, sendLeLampVoiceCommand, sendVoiceConversationTurn, startVoiceConversation, stopVoiceConversation } from "../api/assistant";
-import type { LeLampVoiceCommandResponse, VoiceCaptureResponse, VoiceConversationResponse, VoiceStatus } from "../api/types";
+import {
+  getVoiceRealtimeVoices,
+  getVoiceStatus,
+  postVoiceCaptureOnce,
+  sendLeLampVoiceCommand,
+  sendVoiceConversationTurn,
+  startVoiceAssistant,
+  startVoiceConversation,
+  stopVoiceAssistant,
+  stopVoiceConversation,
+  updateVoiceRealtimeVoice,
+} from "../api/assistant";
+import type { LeLampVoiceCommandResponse, VoiceAssistantProcessStatus, VoiceCaptureResponse, VoiceConversationResponse, VoiceRealtimeVoicesResponse, VoiceStatus } from "../api/types";
 import { Card, InfoCard } from "../components/Card";
 import { PageHeader } from "../components/PageHeader";
 import { SkillChip } from "../components/SkillChip";
@@ -12,6 +23,9 @@ import "./pages.css";
 
 export function VoicePage() {
   const [status, setStatus] = useState<VoiceStatus | null>(null);
+  const [realtimeVoices, setRealtimeVoices] = useState<VoiceRealtimeVoicesResponse | null>(null);
+  const [selectedRealtimeVoice, setSelectedRealtimeVoice] = useState("");
+  const [voiceAssistant, setVoiceAssistant] = useState<VoiceAssistantProcessStatus | null>(null);
   const [capture, setCapture] = useState<VoiceCaptureResponse | null>(null);
   const [conversation, setConversation] = useState<VoiceConversationResponse | null>(null);
   const [authorized, setAuthorized] = useState(false);
@@ -24,14 +38,20 @@ export function VoicePage() {
   const [rememberTurn, setRememberTurn] = useState(false);
   const [busy, setBusy] = useState(false);
   const [lampBusy, setLampBusy] = useState(false);
+  const [voiceAssistantBusy, setVoiceAssistantBusy] = useState(false);
+  const [voiceBusy, setVoiceBusy] = useState(false);
   const [conversationBusy, setConversationBusy] = useState(false);
   const [error, setError] = useState("");
+  const [voiceMessage, setVoiceMessage] = useState("");
 
   const load = useCallback(async () => {
     setError("");
     try {
-      const response = await getVoiceStatus();
-      setStatus(response.data);
+      const [statusResponse, voicesResponse] = await Promise.all([getVoiceStatus(), getVoiceRealtimeVoices()]);
+      setStatus(statusResponse.data);
+      setRealtimeVoices(voicesResponse.data);
+      setVoiceAssistant(statusResponse.data.assistant_process ?? null);
+      setSelectedRealtimeVoice(String(voicesResponse.data.voice || statusResponse.data.realtime.voice || ""));
     } catch (err) {
       setError(apiErrorMessage(err));
     }
@@ -128,6 +148,61 @@ export function VoicePage() {
     }
   }
 
+  async function applyRealtimeVoice() {
+    const voice = selectedRealtimeVoice.trim();
+    if (!voice) {
+      setError("请选择 Qwen 音色。");
+      return;
+    }
+    setVoiceBusy(true);
+    setError("");
+    setVoiceMessage("");
+    try {
+      const response = await updateVoiceRealtimeVoice(voice);
+      setRealtimeVoices(response.data.realtime);
+      setSelectedRealtimeVoice(response.data.voice);
+      setVoiceMessage(`已切换到 ${response.data.voice}`);
+      await load();
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setVoiceBusy(false);
+    }
+  }
+
+  async function startRealtimeVoiceAssistant() {
+    setVoiceAssistantBusy(true);
+    setError("");
+    try {
+      const response = await startVoiceAssistant();
+      setVoiceAssistant(response.data);
+      await load();
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setVoiceAssistantBusy(false);
+    }
+  }
+
+  async function stopRealtimeVoiceAssistant() {
+    setVoiceAssistantBusy(true);
+    setError("");
+    try {
+      const response = await stopVoiceAssistant();
+      setVoiceAssistant(response.data);
+      await load();
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setVoiceAssistantBusy(false);
+    }
+  }
+
+  const voiceOptions = realtimeVoices?.voices ?? status?.realtime.voices ?? [];
+  const selectedVoiceDetail = voiceOptions.find((item) => item.voice === selectedRealtimeVoice);
+  const realtimeAssistantProcess = status?.realtime.assistant_process as VoiceAssistantProcessStatus | undefined;
+  const assistantProcess = voiceAssistant ?? status?.assistant_process ?? realtimeAssistantProcess;
+
   return (
     <>
       <PageHeader
@@ -153,6 +228,35 @@ export function VoicePage() {
               <VoiceStatusRow icon={<Waves size={16} />} label="断句" value={String(status?.vad.status ?? "pending")} detail={status?.vad.endpointing ? "已启用" : "等待检测"} />
               <VoiceStatusRow icon={<Speech size={16} />} label="连续对话" value={String(status?.conversation?.status ?? "pending")} detail={friendlyStatus(status?.conversation?.status)} />
             </div>
+            <div className="realtime-voice-panel">
+              <label>
+                <span>Qwen 音色</span>
+                <select className="input" value={selectedRealtimeVoice} onChange={(event) => setSelectedRealtimeVoice(event.target.value)}>
+                  {voiceOptions.length === 0 && <option value="">等待后端返回音色</option>}
+                  {voiceOptions.map((item) => (
+                    <option key={item.voice} value={item.voice}>
+                      {item.label && item.label !== item.voice ? `${item.label} / ${item.voice}` : item.voice}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button className="primary-button" onClick={() => void applyRealtimeVoice()} disabled={voiceBusy || !selectedRealtimeVoice}>
+                <Volume2 size={16} />应用音色
+              </button>
+              <div className="realtime-voice-note span-2">
+                <strong>{(selectedVoiceDetail?.label ?? selectedRealtimeVoice) || "未选择"}</strong>
+                <span>
+                  {selectedVoiceDetail?.description ?? "保存后会写入 DASHSCOPE_REALTIME_VOICE，新的实时语音会话使用该音色。"}
+                </span>
+                <small>
+                  当前模型：{realtimeVoices?.model ?? status?.realtime.model ?? "pending"}；当前音色：{realtimeVoices?.voice ?? status?.realtime.voice ?? "pending"}
+                  {voiceMessage ? `；${voiceMessage}` : ""}
+                </small>
+              </div>
+              {realtimeVoices?.current_voice_supported === false && (
+                <div className="warning-panel span-2">当前保存的音色不在该模型支持列表内，请重新选择并应用。</div>
+              )}
+            </div>
             <details className="advanced-panel">
               <summary>语音诊断</summary>
               <div className="advanced-panel__content">
@@ -171,7 +275,7 @@ export function VoicePage() {
                 <button className="primary-button" onClick={() => void sendLampCommand()} disabled={lampBusy}>
                   <Send size={16} />发送
                 </button>
-                {["点头", "摇头", "停止跟随", "回到默认状态", "扫描成 PDF", "台灯状态"].map((item) => (
+                {["开启语音助手", "关闭语音助手", "点头", "摇头", "停止跟随", "回到默认状态", "扫描成 PDF", "台灯状态"].map((item) => (
                   <button className="ghost-button" key={item} onClick={() => void sendLampCommand(item)} disabled={lampBusy}>{item}</button>
                 ))}
               </div>
@@ -189,6 +293,31 @@ export function VoicePage() {
                 <pre className="json-preview voice-result-preview">{JSON.stringify(lampCommand ?? { status: "pending", text: lampCommandText }, null, 2)}</pre>
               </div>
             </details>
+          </Card>
+
+          <Card title="实时语音助手" subtitle="启动设备侧 Qwen Omni 实时语音循环；会监听服务器/树莓派麦克风，并把回复播到服务器扬声器">
+            <div className="voice-assistant-control">
+              <div className="definition-grid">
+                <span>状态</span><StatusBadge status={assistantProcess?.status ?? "pending"} />
+                <span>音色</span><strong>{assistantProcess?.voice ?? status?.realtime.voice ?? "等待加载"}</strong>
+                <span>进程</span><strong>{assistantProcess?.pid ? `PID ${assistantProcess.pid}` : "未运行"}</strong>
+                <span>日志</span><strong>{assistantProcess?.log ?? "尚未生成"}</strong>
+              </div>
+              <div className="lamp-command-actions">
+                <button className="primary-button" onClick={() => void startRealtimeVoiceAssistant()} disabled={voiceAssistantBusy || Boolean(assistantProcess?.running)}>
+                  <Mic size={16} />开启语音助手
+                </button>
+                <button className="ghost-button" onClick={() => void stopRealtimeVoiceAssistant()} disabled={voiceAssistantBusy || !assistantProcess?.running}>
+                  停止语音助手
+                </button>
+                <button className="ghost-button" onClick={() => void load()} disabled={voiceAssistantBusy}>
+                  <RefreshCw size={16} />刷新状态
+                </button>
+              </div>
+              <p className={assistantProcess?.running ? "success-panel" : "warning-panel"}>
+                {assistantProcess?.message ?? "语音助手未运行；开启后会持续监听设备侧麦克风。"}
+              </p>
+            </div>
           </Card>
 
           <Card title="单次授权录音" subtitle="只录制 1-8 秒；不启动连续监听；录音后尝试识别并交给助手处理">

@@ -93,6 +93,7 @@ export function ValidationPage() {
       options.keystone_ok = projectionHardwarePassed;
       options.brightness_ok = projectionHardwarePassed;
       options.ambient_lux = 320;
+      options.projector_connected = true;
     }
     if (item.id === "document_scanning") {
       options.authorized = scanAuthorized;
@@ -333,11 +334,11 @@ export function ValidationPage() {
                     <>
                       <label className="inline-check">
                         <input type="checkbox" checked={projectionHardwareAuthorized} onChange={(event) => setProjectionHardwareAuthorized(event.target.checked)} />
-                        授权记录真实投影硬件验收
+                        授权记录真实投影仪验收
                       </label>
                       <label className="inline-check">
                         <input type="checkbox" checked={projectionHardwarePassed} onChange={(event) => setProjectionHardwarePassed(event.target.checked)} />
-                        现场确认画面可读、对焦/梯形/亮度通过
+                        现场确认投影画面可读、对焦/梯形/亮度通过
                       </label>
                       <div className="blue-note">未接真实投影仪时保持未勾选；系统只会生成校准图和 profile，不会伪造硬件通过。</div>
                     </>

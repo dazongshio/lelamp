@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AI Projector Console - Document Workspace</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body data-page="documents">
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand"><div class="brand-mark">AI</div><div><strong>AI Projector</strong><span>树莓派 AI 服务控制台</span></div></div>
+        <nav class="nav-group">
+          <span class="nav-title">工作区</span>
+          <a class="nav-link" href="./index.html" data-page-link="today"><span class="nav-dot">1</span>Today Workspace</a>
+          <a class="nav-link" href="./meeting.html" data-page-link="meeting"><span class="nav-dot">2</span>Meeting Mode</a>
+          <a class="nav-link" href="./documents.html" data-page-link="documents"><span class="nav-dot">3</span>Document Workspace</a>
+          <a class="nav-link" href="./results.html" data-page-link="results"><span class="nav-dot">4</span>Result Center</a>
+        </nav>
+        <div class="sidebar-note"><strong>共享空间模型</strong><span>树莓派共享空间是持续存在的文件桥，不是一次性上传动作。</span></div>
+      </aside>
+      <main class="main">
+        <div class="topbar">
+          <div class="topline"><span class="topline-dot"></span><div><strong>Document Workspace</strong><span>文件、AI 交互、生成结果和电脑控制权限</span></div></div>
+          <div class="topbar-spacer"></div>
+          <span class="status ok">树莓派共享空间</span>
+          <span class="status warn">沙箱控制不直连电脑</span>
+        </div>
+
+        <header class="page-head">
+          <div>
+            <h1>Document Workspace</h1>
+            <p>主文件和 AI 交互页面。树莓派 AI 服务读取共享空间文件，生成摘要、表格、会议材料和草稿；全权控制通过 SSH 直接控制电脑，但必须单独请求。</p>
+          </div>
+          <div class="actions">
+            <button class="btn primary">Import files</button>
+            <button class="btn">Multi-file comparison</button>
+            <button class="btn danger">请求全权控制</button>
+          </div>
+        </header>
+
+        <section class="grid documents">
+          <aside class="panel">
+            <div class="panel-head"><h2>文件夹树</h2><span>共享空间</span></div>
+            <div class="panel-body folder-list">
+              <div class="folder-row active"><strong>树莓派共享空间</strong><span class="status ok">常开共享文件夹</span></div>
+              <div class="folder-row"><strong>会议材料</strong><span>12 files</span></div>
+              <div class="folder-row"><strong>扫描文件</strong><span>8 files</span></div>
+              <div class="folder-row"><strong>合同与表格</strong><span>5 files</span></div>
+              <div class="folder-row"><strong>结果草稿</strong><span>21 files</span></div>
+              <div class="boundary">AI 助手运行在树莓派。文件进入共享空间后，才进入树莓派 AI 服务的处理范围。</div>
+            </div>
+          </aside>
+
+          <main class="grid">
+            <article class="panel">
+              <div class="panel-head">
+                <div><h2>文件列表</h2><span>共享空间文件行显示同步、权限和审计状态</span></div>
+                <div class="actions">
+                  <button class="btn">Sort files</button>
+                  <button class="btn">Filter files</button>
+                </div>
+              </div>
+              <div class="panel-body row-list">
+                <div class="file-row active">
+                  <div class="file-meta"><strong>LeLamp_实时会议_minutes.md</strong><span>树莓派共享空间 / meetings / 18 KB</span></div>
+                  <span class="status ok">同步状态 OK</span>
+                </div>
+                <div class="file-row">
+                  <div class="file-meta"><strong>projector_contract_scan.pdf</strong><span>扫描文件 / documents / 2.4 MB</span></div>
+                  <span class="status warn">等待 OCR</span>
+                </div>
+                <div class="file-row">
+                  <div class="file-meta"><strong>prototype_requirements.docx</strong><span>团队共享空间 / docs / 96 KB</span></div>
+                  <span class="status ok">成员权限 Owner</span>
+                </div>
+              </div>
+            </article>
+
+            <article class="panel">
+              <div class="panel-head"><div><h2>文件内容预览</h2><span>Selected file content preview</span></div><button class="btn">Open original</button></div>
+              <div class="panel-body">
+                <div class="preview-box"># LeLamp 实时会议纪要
+
+决定：默认使用沙箱控制，AI 只处理树莓派共享空间中的内容。
+
+待办：
+- 完成文档工作区的来源范围展示。
+- 让生成结果进入结果中心。
+- 全权控制通过 SSH 直接控制电脑，必须显式请求并可撤销。</div>
+              </div>
+            </article>
+          </main>
+
+          <aside class="inspector">
+            <article class="panel">
+              <div class="panel-head"><h3>AI 交互区</h3><span>Ask AI</span></div>
+              <div class="panel-body command-box">
+                <textarea>基于当前会议纪要，生成待办表格和邮件草稿，但不要发送。</textarea>
+                <div class="source-pill-row">
+                  <span class="chip">来源范围：当前文件</span>
+                  <span class="chip">树莓派 AI 服务</span>
+                  <span class="chip">不读取电脑桌面</span>
+                </div>
+                <button class="btn primary">Ask AI</button>
+              </div>
+            </article>
+
+            <article class="panel">
+              <div class="panel-head"><h3>生成结果</h3><span>Generated Results</span></div>
+              <div class="panel-body row-list">
+                <div class="result-card"><strong>会议待办表格</strong><span>Preview drawer 可快速查看，详情保存到结果中心。</span></div>
+                <div class="result-card"><strong>邮件草稿</strong><span>敏感动作，发送前进入授权面板。</span></div>
+                <div class="actions">
+                  <button class="btn">Save to result center</button>
+                  <button class="btn">Preview</button>
+                </div>
+              </div>
+            </article>
+
+            <article class="panel" id="permissions">
+              <div class="panel-head"><h3>电脑控制权限</h3><span>Permission model</span></div>
+              <div class="panel-body row-list">
+                <div class="permission-row">
+                  <strong>沙箱控制不直连电脑</strong>
+                  <p>可读写树莓派共享空间，生成会议纪要、摘要、表格和草稿；不能打开电脑应用或执行任意命令。</p>
+                  <span class="status ok">当前模式</span>
+                </div>
+                <div class="permission-row">
+                  <strong>全权控制通过 SSH 直接控制电脑</strong>
+                  <p>必须显式请求，可撤销，并写入审计。启用后才能操作 LAN 电脑桌面、打开应用或发送受控命令。</p>
+                  <button class="btn danger">请求全权控制</button>
+                </div>
+              </div>
+            </article>
+
+            <article class="panel">
+              <div class="panel-head"><h3>共享状态</h3><span>同步 / 权限 / 审计</span></div>
+              <div class="panel-body stat-list">
+                <div class="stat-line"><span>同步状态</span><strong>Online</strong></div>
+                <div class="stat-line"><span>成员权限</span><strong>Owner, Viewer</strong></div>
+                <div class="stat-line"><span>共享审计</span><strong>Enabled</strong></div>
+                <div class="stat-line"><span>访问边界</span><strong>Shared space only</strong></div>
+              </div>
+            </article>
+          </aside>
+        </section>
+      </main>
+    </div>
+    <script src="./app.js"></script>
+  </body>
+</html>

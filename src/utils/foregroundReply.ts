@@ -13,6 +13,14 @@ const intentRules: Array<{
   mode?: "query" | "task";
 }> = [
   {
+    intent: "voice_assistant_control",
+    patterns: [/开启语音助手|打开语音助手|启动语音助手|开始语音助手|关闭语音助手|停止语音助手|退出语音助手|关闭实时语音|停止实时语音|开启实时语音|启动实时语音|开始实时语音|开启语音控制|启动语音控制|开始语音控制|语音助手状态|实时语音状态|语音控制状态/i],
+    replies: [
+      "正在执行本地语音助手控制。",
+    ],
+    backend: "本地：Qwen realtime voice process -> 设备侧麦克风/扬声器，不调用普通聊天",
+  },
+  {
     intent: "lamp_control",
     patterns: [/点头|摇头|回到默认|默认位置|默认状态|复位台灯|台灯复位|扫描成?pdf|扫描PDF|拍照扫描|灯头扫描|开始投影|启动投影|打开投影|进入投影|切到投影|投影位置|跟随我|开始跟随|启动跟随|停止跟随|停止追踪|别跟|不要跟|台灯状态|加电|掉电|松开电机|开灯|关灯|暖光|白光|红灯|绿灯|蓝灯|黄灯|紫灯/i],
     replies: [
@@ -27,6 +35,14 @@ const intentRules: Array<{
       "正在执行本地会议控制。",
     ],
     backend: "本地：meeting voice skill -> 会议/听悟控制，不调用 Qwen",
+  },
+  {
+    intent: "remote_control",
+    patterns: [/远程电脑|远程主机|目标电脑|另一台电脑|那台电脑|ssh电脑|打开\s*codex|启动\s*codex|运行\s*codex|电脑状态|ssh状态|ppt下一页|ppt上一页|幻灯片下一页|幻灯片上一页|下一页|上一页|远程.*音量|远程.*静音|远程.*锁屏/i],
+    replies: [
+      "正在执行远程电脑控制。",
+    ],
+    backend: "本地：remote SSH voice skill -> 已保存 SSH 目标，不调用 Qwen",
   },
   {
     intent: "weather_or_time",
@@ -117,7 +133,7 @@ export function isLampControlText(message: string): boolean {
 export function isLocalControlText(message: string): boolean {
   const normalized = message.trim();
   return intentRules
-    .filter((rule) => rule.intent === "lamp_control" || rule.intent === "meeting_control")
+    .filter((rule) => rule.intent === "lamp_control" || rule.intent === "meeting_control" || rule.intent === "voice_assistant_control" || rule.intent === "remote_control")
     .some((rule) => rule.patterns.some((pattern) => pattern.test(normalized)));
 }
 

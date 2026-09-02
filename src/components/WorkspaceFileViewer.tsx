@@ -136,7 +136,7 @@ function baseName(value: string) {
   return String(value || "").replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? "";
 }
 
-function renderMarkdown(text: string) {
+export function renderMarkdown(text: string) {
   const lines = text.split(/\r?\n/);
   const nodes: ReactNode[] = [];
   let listItems: string[] = [];

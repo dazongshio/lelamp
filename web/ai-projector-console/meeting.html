@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AI Projector Console - Meeting Mode</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body data-page="meeting">
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand"><div class="brand-mark">AI</div><div><strong>AI Projector</strong><span>树莓派 AI 服务控制台</span></div></div>
+        <nav class="nav-group">
+          <span class="nav-title">工作区</span>
+          <a class="nav-link" href="./index.html" data-page-link="today"><span class="nav-dot">1</span>Today Workspace</a>
+          <a class="nav-link" href="./meeting.html" data-page-link="meeting"><span class="nav-dot">2</span>Meeting Mode</a>
+          <a class="nav-link" href="./documents.html" data-page-link="documents"><span class="nav-dot">3</span>Document Workspace</a>
+          <a class="nav-link" href="./results.html" data-page-link="results"><span class="nav-dot">4</span>Result Center</a>
+        </nav>
+        <div class="sidebar-note"><strong>会议边界</strong><span>音频采集后由树莓派 AI 服务转写和生成纪要；导出需要授权。</span></div>
+      </aside>
+      <main class="main">
+        <div class="topbar">
+          <div class="topline"><span class="topline-dot"></span><div><strong>Meeting Mode</strong><span>投影、音频、转写和纪要生成统一监控</span></div></div>
+          <div class="topbar-spacer"></div>
+          <span class="status ok">麦克风 ready</span>
+          <span class="status ok">树莓派 AI 服务</span>
+          <span class="status warn">导出授权 required</span>
+        </div>
+        <header class="page-head">
+          <div>
+            <h1>Meeting Mode</h1>
+            <p>会议模式显示投影状态、音频采集、实时转写、自动生成纪要和导出授权。电脑仍只是可选控制目标，不是 AI 运行位置。</p>
+          </div>
+          <div class="actions">
+            <button class="btn primary">Start recording</button>
+            <button class="btn">Test audio</button>
+            <button class="btn danger">Export authorization</button>
+          </div>
+        </header>
+
+        <section class="meeting-layout">
+          <div class="grid">
+            <article class="projector-stage">
+              <span class="status ok">投影状态 Online</span>
+              <h2>LeLamp 实时会议</h2>
+              <p>屏幕仅展示会议标题、当前议题与生成结果确认页；不默认读取电脑桌面内容。</p>
+            </article>
+
+            <section class="audio-grid">
+              <div class="quick-card"><strong>左麦克风</strong><span>输入电平</span><div class="meter"><span style="width:72%"></span></div></div>
+              <div class="quick-card"><strong>右麦克风</strong><span>输入电平</span><div class="meter"><span style="width:64%"></span></div></div>
+              <div class="quick-card"><strong>回声抑制</strong><span>会议采集链路</span><span class="status ok">Ready</span></div>
+              <div class="quick-card"><strong>听写服务</strong><span>树莓派转发音频</span><span class="status ok">Online</span></div>
+            </section>
+
+            <article class="panel">
+              <div class="panel-head"><div><h2>实时转写</h2><span>Speaker labels come from meeting ASR when available</span></div><span class="status ok">实时转写</span></div>
+              <div class="panel-body row-list">
+                <div class="transcript-row"><span class="speaker">Speaker 1</span><span>我们先确认投影场景和共享空间权限。</span><span class="time">09:31</span></div>
+                <div class="transcript-row"><span class="speaker">Speaker 2</span><span>沙箱控制下不需要打开对方电脑，只处理共享文件。</span><span class="time">09:32</span></div>
+                <div class="transcript-row"><span class="speaker">Speaker 1</span><span>待办是把结果中心和导出授权流程做清楚。</span><span class="time">09:33</span></div>
+              </div>
+            </article>
+          </div>
+
+          <aside class="inspector">
+            <article class="panel">
+              <div class="panel-head"><h3>自动生成纪要</h3><span>Auto-generated notes</span></div>
+              <div class="panel-body row-list">
+                <div class="result-card"><strong>会议摘要</strong><span>投影设备的 AI 运行在树莓派，文件桥接依赖共享空间。</span></div>
+                <div class="result-card"><strong>决策</strong><span>沙箱控制作为默认模式，全权控制需要显式授权。</span></div>
+                <div class="result-card"><strong>待办</strong><span>完善文档工作区、结果中心和导出授权面板。</span></div>
+                <button class="btn primary">保存纪要</button>
+              </div>
+            </article>
+            <article class="panel">
+              <div class="panel-head"><h3>导出授权</h3><span>敏感动作</span></div>
+              <div class="panel-body row-list">
+                <div class="danger-note">导出邮件草稿、发送外部文件或触发电脑控制前，需要用户显式授权并写入共享审计。</div>
+                <button class="btn danger">授权导出会议包</button>
+              </div>
+            </article>
+          </aside>
+        </section>
+      </main>
+    </div>
+    <script src="./app.js"></script>
+  </body>
+</html>

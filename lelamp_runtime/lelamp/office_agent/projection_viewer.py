@@ -24,7 +24,7 @@ def latest_projection_file(projection_dir: Path) -> Path | None:
 
 @dataclass
 class ProjectionDocument:
-    title: str = "OpenClaw Display"
+    title: str = "智能台灯投影"
     mode: str = "meeting"
     fields: dict[str, str] = field(default_factory=dict)
     sections: dict[str, list[str]] = field(default_factory=dict)
@@ -277,6 +277,11 @@ def render_page(
     scale = _css_number(profile.scale)
     keystone_x = _css_number(profile.keystone_x)
     keystone_y = _css_number(profile.keystone_y)
+    profile_mode_label = {
+        "manual": "手动",
+        "ambient": "环境自适应",
+        "validation": "验证",
+    }.get(profile.mode, "自定义")
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -294,7 +299,9 @@ def render_page(
     * {{ box-sizing: border-box; }}
     body {{
       margin: 0;
+      height: 100vh;
       min-height: 100vh;
+      overflow: hidden;
       display: grid;
       grid-template-rows: auto 1fr auto;
       background:
@@ -336,6 +343,8 @@ def render_page(
     }}
     main {{
       width: min(1260px, calc(100vw - 80px));
+      min-width: 0;
+      min-height: 0;
       margin: 0 auto;
       align-self: center;
       padding: 34px 0 44px;
@@ -345,6 +354,7 @@ def render_page(
     }}
     .surface {{
       min-height: min(760px, calc(100vh - 170px));
+      min-width: 0;
       display: flex;
       flex-direction: column;
       justify-content: center;
@@ -550,7 +560,7 @@ def render_page(
     }}
     .status-layout {{
       display: grid;
-      grid-template-columns: minmax(0, 1.2fr) minmax(360px, 0.8fr);
+      grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
       gap: 28px;
       align-items: stretch;
     }}
@@ -601,6 +611,72 @@ def render_page(
       text-overflow: ellipsis;
       white-space: nowrap;
     }}
+    @media (max-width: 1100px), (max-height: 800px) {{
+      header, footer {{
+        padding: 10px 24px;
+        gap: 10px;
+        font-size: 12px;
+      }}
+      .brand-mark {{
+        width: 28px;
+        height: 28px;
+        font-size: 13px;
+      }}
+      main {{
+        width: calc(100vw - 48px);
+        padding: 18px 0;
+      }}
+      .surface {{
+        min-height: 0;
+        gap: 16px;
+      }}
+      h1 {{
+        margin-bottom: 12px;
+        font-size: clamp(40px, 5.2vw, 54px);
+        line-height: 1.06;
+      }}
+      h2 {{ font-size: 28px; }}
+      h3 {{ font-size: 22px; }}
+      p, li {{ font-size: 22px; line-height: 1.3; }}
+      .status-layout {{ gap: 18px; }}
+      .status-hero {{
+        min-height: 0;
+        padding: 24px 28px;
+        gap: 14px;
+      }}
+      .status-value {{
+        padding: 10px 14px;
+        font-size: 34px;
+      }}
+      .panel {{
+        min-height: 0;
+        padding: 20px;
+      }}
+      .panel-heading {{
+        padding-bottom: 10px;
+        margin-bottom: 12px;
+        font-size: 20px;
+      }}
+      .panel-heading strong {{
+        min-width: 34px;
+        height: 34px;
+        font-size: 18px;
+      }}
+      .panel-list {{ gap: 9px; }}
+      .panel-list li {{
+        grid-template-columns: 34px minmax(0, 1fr);
+        gap: 10px;
+        overflow-wrap: anywhere;
+        font-size: 21px;
+        line-height: 1.24;
+      }}
+      .panel-list li::before {{
+        width: 34px;
+        height: 34px;
+        font-size: 17px;
+      }}
+      .profile-pill {{ max-width: 38vw; }}
+    }}
     @media (max-width: 720px) {{
       header, footer {{ padding: 14px 18px; font-size: 13px; }}
       main {{ width: min(100vw - 32px, 1180px); padding: 22px 0 28px; }}
@@ -635,7 +711,7 @@ def render_page(
 </head>
 <body class="mode-{html.escape(mode)}">
   <header>
-    <div class="brand"><span class="brand-mark">OC</span><span>OpenClaw Display</span></div>
+    <div class="brand"><span class="brand-mark">灯</span><span>智能台灯投影</span></div>
     <div class="meta meta-pill">{html.escape(source_name)}</div>
   </header>
   <main>
@@ -644,9 +720,9 @@ def render_page(
     </section>
   </main>
   <footer>
-    <div>Updated: {html.escape(updated_at)}</div>
-    <div class="meta-pill profile-pill">Display profile: {html.escape(profile.mode)} · brightness {brightness} · contrast {contrast}</div>
-    <div>Auto refresh: {refresh_seconds}s</div>
+    <div>更新时间：{html.escape(updated_at)}</div>
+    <div class="meta-pill profile-pill">显示方案：{html.escape(profile_mode_label)} · 亮度 {brightness} · 对比度 {contrast}</div>
+    <div>自动刷新：{refresh_seconds} 秒</div>
   </footer>
 </body>
 </html>"""
@@ -711,11 +787,11 @@ class ProjectionPreviewServer:
         profile = self.load_display_profile()
         latest = latest_projection_file(self.projection_dir)
         if latest is None:
-            body = "<div class=\"empty\"><h1>No Projection Yet</h1><p>Render a card with openclaw_cli.py project or lelamp actions.</p></div>"
+            body = "<div class=\"empty\"><h1>暂无投影内容</h1><p>请从智能台灯控制台发送投影卡片。</p></div>"
             return render_page(
-                title="OpenClaw Display Preview",
+                title="智能台灯投影预览",
                 body_html=body,
-                source_name="No projection file",
+                source_name="暂无投影文件",
                 updated_at="-",
                 refresh_seconds=self.refresh_seconds,
                 mode="empty",
@@ -725,7 +801,7 @@ class ProjectionPreviewServer:
         updated_at = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(latest.stat().st_mtime))
         projection_title, mode, body_html = projection_to_html(text)
         return render_page(
-            title=f"OpenClaw - {projection_title}",
+            title=f"智能台灯投影 - {projection_title}",
             body_html=body_html,
             source_name=latest.name,
             updated_at=updated_at,

@@ -1,60 +1,37 @@
 import {
-  BarChart3,
-  Bot,
-  CalendarCheck,
-  ClipboardList,
-  ClipboardCheck,
-  ClipboardPenLine,
   FileText,
-  FolderKanban,
-  Gauge,
-  HelpCircle,
+  Home,
   LampDesk,
-  Monitor,
-  MousePointerClick,
-  Radar,
-  Settings,
-  SlidersHorizontal,
-  Smartphone,
+  MonitorUp,
+  Mic2,
+  MoreHorizontal,
+  Presentation,
+  ScanLine,
   Speech,
-  Wand,
-  Library,
 } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
+import { preloadPage } from "../pageLoaders";
 import "./layout.css";
 
 const navSections = [
   {
-    label: "核心工作流",
+    label: "常用功能",
     items: [
-      { to: "/dashboard", label: "Dashboard", icon: Gauge },
-      { to: "/shared", label: "文件工作区", icon: FolderKanban },
-      { to: "/assistant", label: "助手", icon: Bot },
-      { to: "/meeting", label: "会议助手", icon: CalendarCheck },
-      { to: "/documents", label: "文档处理", icon: FileText },
-      { to: "/wiki", label: "Wiki 知识库", icon: Library },
-      { to: "/projection", label: "投影", icon: Monitor },
+      { to: "/dashboard", label: "首页", icon: Home },
+      { to: "/meeting", label: "会议", icon: Mic2 },
+      { to: "/projection", label: "投影", icon: Presentation },
+      { to: "/documents", label: "文档", icon: FileText },
+      { to: "/scan", label: "扫描", icon: ScanLine },
+      { to: "/motors", label: "台灯控制", icon: LampDesk },
+      { to: "/remote", label: "远程电脑", icon: MonitorUp },
+      { to: "/voice", label: "语音助手", icon: Speech },
     ],
   },
   {
-    label: "自动化与感知",
+    label: "其他",
     items: [
-      { to: "/desktop", label: "桌面代理", icon: MousePointerClick },
-      { to: "/scene", label: "场景感知", icon: Radar },
-      { to: "/voice", label: "语音", icon: Speech },
-      { to: "/motors", label: "五轴控制", icon: SlidersHorizontal },
-      { to: "/mobile", label: "移动端", icon: Smartphone },
-      { to: "/smart-home", label: "智能设备", icon: Wand },
-    ],
-  },
-  {
-    label: "治理与验收",
-    items: [
-      { to: "/checklist", label: "功能清单", icon: ClipboardCheck },
-      { to: "/validation", label: "验收测试", icon: ClipboardPenLine },
-      { to: "/hardware", label: "硬件", icon: BarChart3 },
-      { to: "/audit", label: "审计", icon: ClipboardList },
-      { to: "/settings", label: "设置", icon: Settings },
+      { to: "/results", label: "结果", icon: FileText },
+      { to: "/pot", label: "更多", icon: MoreHorizontal },
     ],
   },
 ];
@@ -67,11 +44,11 @@ export function Sidebar() {
     <aside className="sidebar">
       <div className="sidebar__brand">
         <div className="brand-mark">
-          <LampDesk size={22} />
+          智
         </div>
         <div>
-          <strong>LeLamp</strong>
-          <span>智能办公终端</span>
+          <strong>智能投影助手</strong>
+          <span>会议 · 投影 · 文档</span>
         </div>
       </div>
       <nav className="sidebar__nav" aria-label="主导航">
@@ -87,8 +64,10 @@ export function Sidebar() {
                     to={{ pathname: item.to, search }}
                     className={({ isActive }) => `sidebar__link ${isActive ? "active" : ""}`}
                     title={item.label}
+                    onPointerEnter={() => preloadPage(item.to)}
+                    onFocus={() => preloadPage(item.to)}
                   >
-                    <Icon size={18} />
+                    <span className="sidebar__dot"><Icon size={19} /></span>
                     <span>{item.label}</span>
                   </NavLink>
                 );
@@ -97,15 +76,10 @@ export function Sidebar() {
           </div>
         ))}
       </nav>
-      <div className="sidebar__meta">
-        <span>LeLamp v1.3.0</span>
-        <span>OpenClaw v0.5.2</span>
-        <span>© 2024 LeLamp Project</span>
+      <div className="sidebar-note">
+        <strong>设备已就绪</strong>
+        <span>如需帮助，请从首页选择要使用的功能。</span>
       </div>
-      <button className="sidebar__help">
-        <HelpCircle size={18} />
-        系统帮助 & 文档
-      </button>
     </aside>
   );
 }

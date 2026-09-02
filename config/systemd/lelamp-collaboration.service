@@ -1,0 +1,13 @@
+[Unit]
+Description=LeLamp collaborative document service
+After=network.target lelamp-web-console.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/lelamp
+ExecStart=/bin/bash %h/lelamp/scripts/start_collaboration_server.sh
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

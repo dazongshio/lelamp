@@ -1,839 +1,1092 @@
-import { AlertTriangle, BookOpen, Camera, ExternalLink, FileImage, FileText, ListTree, ScanLine, Table2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import { apiErrorMessage, readToken } from "../api/client";
 import {
-  checkScanCaptureReadiness,
-  captureDocumentScan,
-  captureDeviceDocumentScan,
-  createDemoScanImage,
-  getDocumentAdaptersStatus,
-  runDocumentAnalyze,
-  runDocumentReportOutline,
-  runDocumentRisks,
-  runDocumentTableExtract,
-  runScanEnhance,
-  runScanProcess,
+  ArchiveRestore,
+  ChevronDown,
+  ChevronRight,
+  Clock3,
+  Code2,
+  Download,
+  FilePlus2,
+  FileText,
+  Folder,
+  FolderPlus,
+  Heading1,
+  Heading2,
+  ImagePlus,
+  Link2,
+  List,
+  ListChecks,
+  MessageSquare,
+  MoreHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plus,
+  Quote,
+  Search,
+  Sparkles,
+  Star,
+  Table2,
+  Trash2,
+  Users,
+  X,
+} from "lucide-react";
+import { useEditor, EditorContent } from "@tiptap/react";
+import { Extension, Node as TiptapNode } from "@tiptap/core";
+import StarterKit from "@tiptap/starter-kit";
+import Placeholder from "@tiptap/extension-placeholder";
+import TaskList from "@tiptap/extension-task-list";
+import TaskItem from "@tiptap/extension-task-item";
+import Table from "@tiptap/extension-table";
+import TableRow from "@tiptap/extension-table-row";
+import TableHeader from "@tiptap/extension-table-header";
+import TableCell from "@tiptap/extension-table-cell";
+import Image from "@tiptap/extension-image";
+import Link from "@tiptap/extension-link";
+import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
+import { HocuspocusProvider } from "@hocuspocus/provider";
+import * as Y from "yjs";
+import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ApiClientError, apiErrorMessage } from "../api/client";
+import {
+  addDocumentComment,
+  applyDocumentAiSuggestion,
+  createCollaborativeDocument,
+  createDocumentShareLink,
+  downloadDocumentAttachment,
+  exportDocumentMarkdown,
+  getCollaborativeDocument,
+  getDocumentCollaborationSession,
+  getDocumentRevision,
+  generateDocumentAiSuggestion,
+  listDocumentAttachments,
+  listDocumentComments,
+  listDocumentHistory,
+  migrateWorkspaceMarkdown,
+  purgeCollaborativeDocument,
+  restoreCollaborativeDocument,
+  restoreDocumentRevision,
+  setDocumentPermissions,
+  setCollaborativeDocumentFavorite,
+  trashCollaborativeDocument,
+  updateCollaborativeDocument,
+  updateDocumentComment,
+  uploadDocumentAttachment,
+  type CollaborativeDocument,
+  type DocumentAttachment,
+  type DocumentComment,
+  type DocumentPermission,
+  type DocumentRevision,
 } from "../api/documents";
-import { getSecurity } from "../api/security";
-import { getSharedFiles, getSharedPreview, getWorkspaceFiles, getWorkspacePreview } from "../api/shared";
-import { syncWorkspaceFileToWiki } from "../api/wiki";
-import type { DocumentAdapter, DocumentResult, DocmostSyncResponse, ScanResult, SecurityStatus, SharedFile, SharedPreviewResponse } from "../api/types";
-import { Card } from "../components/Card";
-import { PageHeader } from "../components/PageHeader";
-import { StatusBadge } from "../components/StatusBadge";
-import { WorkspaceFileViewer } from "../components/WorkspaceFileViewer";
-import { mockSecurity } from "../data/mockSecurity";
+import { htmlToMarkdown, markdownToHtml } from "../utils/documentMarkdown";
+import { randomId } from "../utils/randomId";
+import { DocumentToolbar } from "./DocumentToolbar";
+import { DocumentEditor } from "./DocumentEditor";
+import { DocumentList } from "./DocumentList";
+import { useDocumentWorkspace } from "./useDocumentWorkspace";
+import { useDocumentCollaboration } from "./useDocumentCollaboration";
+import {
+  CalloutExtension,
+  DOCUMENT_FOLDERS_KEY,
+  DocsNavButton,
+  RemoteCursorExtension,
+  createRemoteCursor,
+  downloadBlob,
+  escapeHtml,
+  formatBytes,
+  formatRelative,
+  formatTime,
+  friendlySource,
+  getDocumentHeadings,
+  insertLocalImage,
+  libraryTitle,
+  loadDocumentFolders,
+  roleLabel,
+  remoteCursorPluginKey,
+  safeCursorColor,
+  safeDownloadName,
+  updateSharedText,
+  type DocumentFolder,
+  type InspectorView,
+  type LibraryView,
+  type RemoteCursor,
+  type SaveState,
+} from "./documentPageSupport";
 import "./pages.css";
 
+const DocumentInspector = lazy(async () => ({ default: (await import("./DocumentInspector")).DocumentInspector }));
+
 export function DocumentsPage() {
-  const [searchParams] = useSearchParams();
-  const [source, setSource] = useState("shared_inbox");
-  const [files, setFiles] = useState<SharedFile[]>([]);
-  const [selected, setSelected] = useState("");
-  const [preview, setPreview] = useState<SharedPreviewResponse | null>(null);
-  const [artifactPath, setArtifactPath] = useState("");
-  const [artifactPreview, setArtifactPreview] = useState<SharedPreviewResponse | null>(null);
-  const [artifactPreviewError, setArtifactPreviewError] = useState("");
-  const [artifactPreviewBusy, setArtifactPreviewBusy] = useState(false);
-  const [wikiBusyPath, setWikiBusyPath] = useState("");
-  const [wikiResult, setWikiResult] = useState<DocmostSyncResponse | null>(null);
-  const [result, setResult] = useState<DocumentResult | null>(null);
-  const [scanResult, setScanResult] = useState<ScanResult | null>(null);
-  const [captureReadiness, setCaptureReadiness] = useState<Record<string, unknown> | null>(null);
-  const [adapters, setAdapters] = useState<Record<string, string>>({});
-  const [security, setSecurity] = useState<SecurityStatus>(mockSecurity);
-  const [message, setMessage] = useState("等待选择文件");
-  const [error, setError] = useState("");
-  const [scanBusy, setScanBusy] = useState(false);
-  const [cameraOpen, setCameraOpen] = useState(false);
-  const [cameraReady, setCameraReady] = useState(false);
-  const [scanTitle, setScanTitle] = useState("实体文档扫描");
-  const [scanType, setScanType] = useState("document");
-  const [scanLanguage, setScanLanguage] = useState("chi_sim+eng");
-  const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
-  const cameraStreamRef = useRef<MediaStream | null>(null);
-  const uploadInputRef = useRef<HTMLInputElement | null>(null);
-
-  const load = useCallback(async () => {
-    setError("");
-    try {
-      const listFiles = source === "workspace" ? getWorkspaceFiles : getSharedFiles;
-      const [filesResult, adaptersResult, securityResult] = await Promise.all([
-        listFiles({ page_size: source === "workspace" ? 300 : 100 }),
-        getDocumentAdaptersStatus(),
-        getSecurity(),
-      ]);
-      const nextFiles = filesResult.data.files ?? [];
-      setFiles(nextFiles);
-      setAdapters(adaptersResult.data.adapters);
-      setSecurity(securityResult.data);
-      setSelected((current) => nextFiles.some((file) => file.relative_path === current) ? current : nextFiles[0]?.relative_path || "");
-    } catch (err) {
-      setError(apiErrorMessage(err));
-    }
-  }, [source]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  useEffect(() => {
-    if (searchParams.get("scan") !== "1") return;
-    setSource(searchParams.get("source") === "scene" ? "shared_inbox" : "shared_inbox");
-    setScanType(searchParams.get("type") || "document");
-    setMessage("场景工作流已打开扫描入口，请主动拍照或上传实体文档。");
-  }, [searchParams]);
-
-  useEffect(() => () => stopScanCamera(), []);
-
-  useEffect(() => {
-    if (!selected) return;
-    const previewFile = source === "workspace" ? getWorkspacePreview : getSharedPreview;
-    void previewFile(selected)
-      .then((response) => setPreview(response.data))
-      .catch((err) => setPreview({ status: "blocked", workspace_name: selected, name: selected, size_bytes: 0, text: apiErrorMessage(err) }));
-  }, [selected, source]);
-
-  useEffect(() => {
-    setResult(null);
-    setArtifactPath("");
-    setArtifactPreview(null);
-    setArtifactPreviewError("");
-    setMessage(selected ? "等待操作" : "等待选择文件");
-  }, [selected, source]);
-
-  const selectedFile = useMemo(() => files.find((file) => file.relative_path === selected), [files, selected]);
-  const selectedAnalysisSupported = isDocumentAnalysisSupported(selected);
-  const analysisDisabled = !selected || !selectedAnalysisSupported;
-  const resultArtifacts = useMemo(() => documentResultArtifacts(result, scanResult), [result, scanResult]);
-
-  async function run(label: string, action: (filePath: string) => Promise<{ data: DocumentResult }>) {
-    if (!selected) {
-      setError("请先选择已上传的文件。");
-      return;
-    }
-    setError("");
-    setMessage(`${label} 执行中...`);
-    try {
-      const response = await action(selected);
-      setResult(response.data);
-      setMessage(`${label} 状态：${response.data.status}`);
-    } catch (err) {
-      setError(apiErrorMessage(err));
-      setMessage(`${label} 失败`);
-    }
-  }
-
-  async function processSelectedScan() {
-    if (!selected) {
-      setError("请先选择已上传的图片文件。");
-      return;
-    }
-    setScanBusy(true);
-    setError("");
-    setMessage("正在处理实体文档扫描...");
-    try {
-      const response = await runScanProcess(selected, { document_type: scanType, language: scanLanguage });
-      setScanResult(response.data);
-      setMessage(`扫描处理状态：${response.data.status}`);
-      await load();
-    } catch (err) {
-      setError(apiErrorMessage(err));
-      setMessage("扫描处理失败");
-    } finally {
-      setScanBusy(false);
-    }
-  }
-
-  async function enhanceSelectedScan() {
-    if (!selected) {
-      setError("请先选择已上传的图片文件。");
-      return;
-    }
-    setScanBusy(true);
-    setError("");
-    setMessage("正在自动识别四角并矫正图片...");
-    try {
-      const response = await runScanEnhance(selected);
-      setScanResult(response.data);
-      const correction = scanCorrection(response.data);
-      setMessage(`四角矫正状态：${correction.status || response.data.status}`);
-      await load();
-    } catch (err) {
-      setError(apiErrorMessage(err));
-      setMessage("四角矫正失败");
-    } finally {
-      setScanBusy(false);
-    }
-  }
-
-  async function checkSelectedCaptureReadiness() {
-    if (!selected) {
-      setError("请先选择已上传的图片文件。");
-      return;
-    }
-    setScanBusy(true);
-    setError("");
-    setMessage("正在判断当前图片是否满足自动拍照条件...");
-    try {
-      const response = await checkScanCaptureReadiness(selected);
-      setCaptureReadiness(response.data);
-      setMessage(`自动拍照候选状态：${String(response.data.status ?? "unknown")}`);
-      await load();
-    } catch (err) {
-      setError(apiErrorMessage(err));
-      setMessage("自动拍照候选判断失败");
-    } finally {
-      setScanBusy(false);
-    }
-  }
-
-  async function captureScanFromFile(file: File) {
-    setScanBusy(true);
-    setError("");
-    setMessage("正在上传并识别实体文档...");
-    try {
-      const imageDataUrl = await fileToDataUrl(file);
-      const response = await captureDocumentScan({
-        image_data_url: imageDataUrl,
-        title: scanTitle || file.name,
-        document_type: scanType,
-        language: scanLanguage,
-      });
-      setScanResult(response.data);
-      setMessage(`扫描采集状态：${response.data.status}`);
-      await load();
-    } catch (err) {
-      setError(apiErrorMessage(err));
-      setMessage("扫描采集失败");
-    } finally {
-      setScanBusy(false);
-    }
-  }
-
-  async function openScanCamera() {
-    setError("");
-    setMessage("正在打开浏览器摄像头预览...");
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setMessage("当前浏览器不支持预览拍照，已改用设备相机拍照扫描。");
-      await captureScanFromDeviceCamera();
-      return;
-    }
-    try {
-      stopScanCamera();
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: "environment" },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-        },
-        audio: false,
-      });
-      cameraStreamRef.current = stream;
-      setCameraOpen(true);
-      setCameraReady(false);
-      window.setTimeout(async () => {
-        if (!cameraVideoRef.current) return;
-        cameraVideoRef.current.srcObject = stream;
-        try {
-          await cameraVideoRef.current.play();
-          setCameraReady(true);
-          setMessage("摄像头已打开，请把纸质文档放入画面后点击“拍照并识别”。");
-        } catch (err) {
-          setError(apiErrorMessage(err));
-          setMessage("摄像头预览启动失败");
-          stopScanCamera();
-        }
-      }, 0);
-    } catch (err) {
-      stopScanCamera();
-      setMessage("浏览器预览不可用，已改用设备相机拍照扫描。");
-      await captureScanFromDeviceCamera();
-    }
-  }
-
-  async function captureScanFromDeviceCamera() {
-    setScanBusy(true);
-    setError("");
-    setMessage("正在调用设备摄像头拍照扫描...");
-    try {
-      const response = await captureDeviceDocumentScan({
-        title: scanTitle || "device_document_scan",
-        document_type: scanType,
-        language: scanLanguage,
-        camera_index: 0,
-      });
-      setScanResult(response.data);
-      setMessage(`设备拍照扫描状态：${response.data.status}`);
-      await load();
-    } catch (err) {
-      setError(apiErrorMessage(err));
-      setMessage("设备摄像头拍照失败，可改用“上传图片扫描”。");
-    } finally {
-      setScanBusy(false);
-    }
-  }
-
-  function stopScanCamera() {
-    cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
-    cameraStreamRef.current = null;
-    if (cameraVideoRef.current) cameraVideoRef.current.srcObject = null;
-    setCameraOpen(false);
-    setCameraReady(false);
-  }
-
-  async function captureScanFromCamera() {
-    const video = cameraVideoRef.current;
-    if (!video || !cameraReady || !video.videoWidth || !video.videoHeight) {
-      setError("摄像头画面还没有准备好，请稍等一秒再拍照。");
-      return;
-    }
-    setScanBusy(true);
-    setError("");
-    setMessage("正在拍照并识别实体文档...");
-    try {
-      const canvas = document.createElement("canvas");
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const context = canvas.getContext("2d");
-      if (!context) throw new Error("无法创建拍照画布。");
-      context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const response = await captureDocumentScan({
-        image_data_url: canvas.toDataURL("image/jpeg", 0.92),
-        title: scanTitle || "camera_document_scan",
-        document_type: scanType,
-        language: scanLanguage,
-      });
-      setScanResult(response.data);
-      setMessage(`拍照扫描状态：${response.data.status}`);
-      stopScanCamera();
-      await load();
-    } catch (err) {
-      setError(apiErrorMessage(err));
-      setMessage("拍照扫描失败");
-    } finally {
-      setScanBusy(false);
-    }
-  }
-
-  async function generateDemoScan() {
-    setScanBusy(true);
-    setError("");
-    setMessage("正在生成扫描验收样张...");
-    try {
-      const response = await createDemoScanImage({ title: scanTitle || "validation_scan_demo", document_type: scanType });
-      const workspaceName = String(response.data.workspace_name ?? "");
-      if (workspaceName) {
-        setSelected(workspaceName);
-        setMessage(`已生成样张：${compactDisplayPath(workspaceName)}，可继续判断自动拍照候选或处理当前图片。`);
-      } else {
-        setMessage(`样张生成状态：${String(response.data.status ?? "unknown")}`);
-      }
-      await load();
-    } catch (err) {
-      setError(apiErrorMessage(err));
-      setMessage("生成扫描验收样张失败");
-    } finally {
-      setScanBusy(false);
-    }
-  }
-
-  async function openResultArtifact(path: string) {
-    setArtifactPath(path);
-    setArtifactPreview(null);
-    setArtifactPreviewError("");
-    setArtifactPreviewBusy(true);
-    try {
-      const response = await getWorkspacePreview(workspaceArtifactPath(path));
-      setArtifactPreview(response.data);
-    } catch (err) {
-      setArtifactPreviewError(apiErrorMessage(err));
-    } finally {
-      setArtifactPreviewBusy(false);
-    }
-  }
-
-  async function syncToWiki(filePath: string, title?: string) {
-    const workspaceName = workspaceArtifactPath(filePath);
-    if (!workspaceName) {
-      setError("没有可同步的文件。");
-      return;
-    }
-    setError("");
-    setWikiBusyPath(workspaceName);
-    setMessage("正在同步到 Wiki...");
-    try {
-      const response = await syncWorkspaceFileToWiki({
-        filePath: workspaceName,
-        title: title || workspaceName.split("/").pop() || "LeLamp 文档",
-      });
-      setWikiResult(response.data);
-      setMessage(`已同步到 Wiki：${response.data.docmost_page_title}`);
-      if (response.data.docmost_page_url) {
-        window.open(response.data.docmost_page_url, "_blank", "noopener,noreferrer");
-      }
-    } catch (err) {
-      setError(apiErrorMessage(err));
-      setMessage("同步到 Wiki 失败");
-    } finally {
-      setWikiBusyPath("");
-    }
-  }
-
-  const adapterRows: DocumentAdapter[] = Object.entries(adapters).map(([name, status]) => ({
-    name,
-    status,
-    backend: name.includes("scan") || name === "ocr" || name === "vision_ocr" ? "Browser camera + OpenCV + OpenAI/DashScope vision + local OCR" : "OpenClaw local service",
-    endpoint: name.includes("scan") ? "scan" : name === "ocr" || name === "vision_ocr" ? "ocr" : "document",
-    lastHeartbeat: "on request",
-    note: status === "available" ? "已接入本地文本能力" : "未接入能力如实显示，不伪装成功",
-  }));
-
-  return (
-    <>
-      <PageHeader title="文档处理" description="选择文件后直接查看、分析或扫描" actions={<button className="ghost-button" onClick={() => void load()}>刷新</button>} />
-      <div className="page-grid">
-        {error && <div className="danger-panel">操作失败：{error}</div>}
-        <Card title="文件与操作" subtitle="上传区和工作区文件都可预览；分析只作用于当前选择文件。">
-          <div className="document-command-strip">
-            <div className="document-source-tabs" role="tablist" aria-label="文档来源">
-              {["shared_inbox", "workspace"].map((item) => (
-                <button className={source === item ? "selected" : ""} key={item} onClick={() => setSource(item)} type="button">
-                  <FileText size={16} />
-                  {item === "shared_inbox" ? "上传文件" : "工作区"}
-                </button>
-              ))}
-            </div>
-            <select className="select document-file-select" value={selected} onChange={(event) => setSelected(event.target.value)}>
-              {files.map((file) => <option value={file.relative_path} key={file.relative_path}>{file.relative_path}</option>)}
-            </select>
-            <button className="ghost-button" onClick={() => void load()}>刷新列表</button>
-          </div>
-          <div className="selected-file selected-file--compact">
-            <strong>{selectedFile?.name ?? "暂无文件"}</strong>
-            <span className="small">{selected ? compactDisplayPath(selected) : "请先上传文件"}</span>
-            <span className="small muted">{selectedFile?.mime_type ?? "-"} · {selectedFile?.size_label ?? "-"} · {selectedFile?.uploaded_at ?? "-"}</span>
-          </div>
-          <div className="document-action-row">
-            <button className="primary-button" onClick={() => void run("文档分析", runDocumentAnalyze)} disabled={analysisDisabled}>
-              <FileText size={16} /> 分析
-            </button>
-            <button className="ghost-button" onClick={() => void run("汇报提纲", (file) => runDocumentReportOutline(file, selectedFile?.name ?? "汇报提纲"))} disabled={analysisDisabled}>
-              <ListTree size={16} /> 提纲
-            </button>
-            <button className="ghost-button" onClick={() => void run("风险扫描", runDocumentRisks)} disabled={analysisDisabled}>
-              <AlertTriangle size={16} /> 风险
-            </button>
-            <button className="ghost-button" onClick={() => void run("表格提取", runDocumentTableExtract)} disabled={analysisDisabled}>
-              <Table2 size={16} /> 表格
-            </button>
-            <button className="ghost-button" onClick={() => setMessage(`扫描：${friendlyStatus(adapters.scan_capture ?? "adapter_ready")} / 文字识别：${friendlyStatus(adapters.ocr ?? "unavailable")}`)}>
-              <ScanLine size={16} /> 扫描状态
-            </button>
-            <button className="ghost-button" onClick={() => void syncToWiki(selected, selectedFile?.name)} disabled={!selected || wikiBusyPath === workspaceArtifactPath(selected)}>
-              <BookOpen size={16} /> {wikiBusyPath === workspaceArtifactPath(selected) ? "同步中..." : "同步到 Wiki"}
-            </button>
-          </div>
-          <div className="document-status-line">
-            <StatusBadge status={!selectedAnalysisSupported && selected ? "unsupported" : result?.status ?? preview?.status ?? "pending"} />
-            <span>{!selectedAnalysisSupported && selected ? "该文件类型可查看/下载，但不能做文本分析。" : message}</span>
-          </div>
-          {wikiResult?.docmost_page_url && (
-            <a className="card-link" href={wikiResult.docmost_page_url} target="_blank" rel="noreferrer">
-              <ExternalLink size={16} /> 打开最近同步的 Wiki 页面
-            </a>
-          )}
-        </Card>
-
-        <div className="scan-workbench">
-          <Card title="实体文档采集" subtitle="手机全能扫描王式流程：拍照/上传、边界校正、增强、文字与结构识别" action={<StatusBadge status={scanResult?.status ?? adapters.ocr ?? "pending"} />}>
-            <div className="scan-controls">
-              <input className="input" value={scanTitle} onChange={(event) => setScanTitle(event.target.value)} placeholder="扫描标题" />
-              <select className="select" value={scanType} onChange={(event) => setScanType(event.target.value)}>
-                <option value="document">普通文档</option>
-                <option value="contract">合同</option>
-                <option value="business_card">名片</option>
-                <option value="receipt">票据</option>
-                <option value="whiteboard">白板</option>
-              </select>
-              <select className="select" value={scanLanguage} onChange={(event) => setScanLanguage(event.target.value)}>
-                <option value="chi_sim+eng">中文+英文</option>
-                <option value="ch">中文</option>
-                <option value="en">英文</option>
-              </select>
-            </div>
-            <div className="scan-actions">
-              <button className="primary-button" onClick={() => void captureScanFromDeviceCamera()} disabled={scanBusy}>
-                <Camera size={16} /> {scanBusy ? "处理中..." : "调用设备相机拍照"}
-              </button>
-              <button className="ghost-button" onClick={() => uploadInputRef.current?.click()} disabled={scanBusy}>
-                <FileImage size={16} /> 上传图片扫描
-              </button>
-              <button className="ghost-button" onClick={() => void enhanceSelectedScan()} disabled={scanBusy || !selected}>
-                <ScanLine size={16} /> 四角矫正/增强
-              </button>
-              <button className="ghost-button" onClick={() => void processSelectedScan()} disabled={scanBusy || !selected}>
-                <ScanLine size={16} /> 处理并 OCR
-              </button>
-              <button className="ghost-button" onClick={() => void checkSelectedCaptureReadiness()} disabled={scanBusy || !selected}>
-                判断自动拍照候选
-              </button>
-              <button className="ghost-button" onClick={() => void generateDemoScan()} disabled={scanBusy}>
-                生成验收样张
-              </button>
-            </div>
-            <details className="advanced-panel scan-browser-camera">
-              <summary>浏览器摄像头预览</summary>
-              <div className="advanced-panel__content">
-                <p className="small muted">该入口需要 HTTPS 或 localhost。局域网 HTTP 下会自动改用设备相机拍照。</p>
-                <button className="ghost-button" onClick={() => void openScanCamera()} disabled={scanBusy || cameraOpen}>
-                  打开浏览器预览
-                </button>
-              </div>
-            </details>
-            {cameraOpen && (
-              <div className="scan-camera-panel">
-                <video ref={cameraVideoRef} className="scan-camera-preview" playsInline muted />
-                <div className="scan-camera-actions">
-                  <button className="primary-button" onClick={() => void captureScanFromCamera()} disabled={scanBusy || !cameraReady}>
-                    拍照并识别
-                  </button>
-                  <button className="ghost-button" onClick={stopScanCamera} disabled={scanBusy}>
-                    关闭摄像头
-                  </button>
-                </div>
-              </div>
-            )}
-            <input
-              ref={uploadInputRef}
-              className="hidden-file-input"
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                event.target.value = "";
-                if (file) void captureScanFromFile(file);
-              }}
-            />
-            <div className="scan-capability-grid">
-              <span>自动边界</span><StatusBadge status={scanEnhancement(scanResult) ? "completed" : "adapter_ready"} />
-              <span>视觉校正</span><StatusBadge status={String(scanCorrection(scanResult).status) === "detected" ? "completed" : scanEnhancement(scanResult) ? "adapter_ready" : "adapter_ready"} label={String(scanCorrection(scanResult).status || "") || undefined} />
-              <span>去阴影/增强</span><StatusBadge status={scanEnhancement(scanResult) ? "completed" : "adapter_ready"} />
-              <span>文字/结构识别</span><StatusBadge status={scanResult?.status ?? adapters.ocr ?? "backend_missing"} />
-              <span>视觉识别</span><StatusBadge status={adapters.vision_ocr ?? "backend_missing"} />
-              <span>自动拍照候选</span><StatusBadge status={String(captureReadiness?.status ?? "pending")} />
-            </div>
-            <p className="small muted">识别能力会优先使用已配置的视觉模型；不可用时只完成图像增强和待处理记录，不伪造识别结果。</p>
-          </Card>
-          <Card title="扫描结果" action={<StatusBadge status={scanResult?.status ?? "pending"} />}>
-            <div className="definition-grid">
-              <span>原图</span><strong>{scanResult?.source_workspace_name || scanResult?.image ? "已保存" : "-"}</strong>
-              <span>四角状态</span><strong>{String(scanCorrection(scanResult).status ?? "-")}</strong>
-              <span>四角置信度</span><strong>{String(scanCorrection(scanResult).confidence ?? "-")}</strong>
-              <span>增强图</span><strong>{scanEnhancement(scanResult)?.enhanced_workspace_name ? "已生成" : "-"}</strong>
-              <span>识别文本</span><strong>{scanResult?.text_path ? "已生成" : "-"}</strong>
-              <span>结构识别</span><strong>{scanResult?.structure_path ? "已生成" : "-"}</strong>
-              <span>表格文件</span><strong>{scanResult?.table_paths?.length ? `${scanResult.table_paths.length} 个` : "-"}</strong>
-              <span>拍照候选</span><strong>{String(captureReadiness?.stable_score ?? "-")}</strong>
-            </div>
-            <ScanArtifactLinks scanResult={scanResult} />
-            <details className="advanced-panel">
-              <summary>扫描诊断</summary>
-              <div className="advanced-panel__content">
-                <pre className="json-preview scan-result-preview">{JSON.stringify(scanResult ?? { status: "pending", message: "等待拍照或上传实体文档。" }, null, 2)}</pre>
-                {captureReadiness && <pre className="json-preview scan-result-preview">{JSON.stringify(captureReadiness, null, 2)}</pre>}
-              </div>
-            </details>
-          </Card>
-        </div>
-
-        <div className="documents-grid">
-          <Card title="文档预览">
-            <WorkspaceFileViewer
-              source={source === "workspace" ? "workspace" : "shared_inbox"}
-              filePath={selected}
-              preview={preview}
-              title="文档查看"
-            />
-          </Card>
-          <div className="stack">
-            <Card title="分析摘要" action={<StatusBadge status={result?.status ?? "pending"} />}>
-              <div className="document-result-summary">
-                <div>
-                  <span>输出</span>
-                  <strong>{result?.outputs?.length ?? 0}</strong>
-                </div>
-                <div>
-                  <span>风险</span>
-                  <strong>{result?.risks?.length ?? 0}</strong>
-                </div>
-                <div>
-                  <span>表格</span>
-                  <strong>{result?.table_path || scanResult?.table_paths?.length ? "已生成" : "-"}</strong>
-                </div>
-              </div>
-              <p className="blue-note">{String(result?.summary ?? message)}</p>
-              <details className="advanced-panel compact-details">
-                <summary>元数据</summary>
-                <div className="list-rows compact">
-                  {Object.entries(result?.metadata ?? {}).slice(0, 8).map(([key, value]) => (
-                    <div className="row-between" key={key}>
-                      <span>{key}</span>
-                      <strong>{String(value)}</strong>
-                    </div>
-                  ))}
-                  {!Object.keys(result?.metadata ?? {}).length && <span className="small muted">等待分析结果。</span>}
-                </div>
-              </details>
-            </Card>
-            <Card title="结果文件" action={<StatusBadge status={resultArtifacts.length ? "available" : "pending"} label={`${resultArtifacts.length} 个`} />}>
-              <div className="document-artifact-list">
-                {resultArtifacts.map((artifact) => (
-                  <button
-                    className={artifact.workspaceName === artifactPath ? "document-artifact-button selected" : "document-artifact-button"}
-                    key={`${artifact.label}-${artifact.workspaceName}`}
-                    onClick={() => void openResultArtifact(artifact.workspaceName)}
-                    type="button"
-                  >
-                    <FileText size={16} />
-                    <span>{artifact.label}</span>
-                    <small>{compactDisplayPath(artifact.workspaceName)}</small>
-                  </button>
-                ))}
-                {!resultArtifacts.length && <div className="blue-note">运行分析、提纲、表格提取或扫描后，结果文件会出现在这里。</div>}
-              </div>
-            </Card>
-            {(artifactPath || artifactPreviewBusy || artifactPreviewError) && (
-              <Card
-                title="结果查看"
-                action={
-                  artifactPath ? (
-                    <button className="ghost-button" onClick={() => void syncToWiki(artifactPath, artifactPath.split("/").pop())} disabled={wikiBusyPath === workspaceArtifactPath(artifactPath)}>
-                      <BookOpen size={16} /> {wikiBusyPath === workspaceArtifactPath(artifactPath) ? "同步中..." : "同步到 Wiki"}
-                    </button>
-                  ) : undefined
-                }
-              >
-                <WorkspaceFileViewer
-                  source="workspace"
-                  filePath={workspaceArtifactPath(artifactPath)}
-                  preview={artifactPreview}
-                  busy={artifactPreviewBusy}
-                  error={artifactPreviewError}
-                  title="结果查看"
-                  compact
-                />
-              </Card>
-            )}
-            <Card title="风险" action={<StatusBadge status={result?.risks?.length ? "warning" : "adapter_ready"} label={`${result?.risks?.length ?? 0} 项风险`} />}>
-              <div className="risk-list">
-                {(result?.risks ?? []).map((risk, index) => <div key={index}><StatusBadge status="warning" label={String(risk.level ?? "risk")} /> {String(risk.marker ?? JSON.stringify(risk))}</div>)}
-                {!result?.risks?.length && <div className="blue-note">尚未发现风险或未运行风险扫描。</div>}
-              </div>
-            </Card>
-          </div>
-        </div>
-
-        <details className="advanced-panel">
-          <summary>高级诊断</summary>
-          <div className="advanced-panel__content">
-            <Card title="能力适配状态">
-              <div className="list-rows compact">
-                {adapterRows.map((row) => (
-                  <div className="row-between" key={row.name}>
-                    <span>{row.name}</span>
-                    <StatusBadge status={row.status} label={friendlyStatus(row.status)} />
-                  </div>
-                ))}
-              </div>
-            </Card>
-            <Card title="安全范围">
-              <div className="list-rows">
-                {security.allowed_roots.map((root) => <div className="row-between" key={root}><strong>{compactDisplayPath(root)}</strong><span>可读/可分析</span></div>)}
-              </div>
-            </Card>
-            <Card title="原始分析结果">
-              <pre className="json-preview">{JSON.stringify(result ?? {}, null, 2)}</pre>
-            </Card>
-          </div>
-        </details>
-      </div>
-    </>
-  );
-}
-
-function friendlyStatus(status: unknown) {
-  const value = String(status ?? "");
-  const labels: Record<string, string> = {
-    ok: "正常",
-    available: "可用",
-    completed: "已完成",
-    pending: "等待",
-    running: "处理中",
-    blocked: "已阻止",
-    failed: "失败",
-    unavailable: "不可用",
-    adapter_ready: "待接入",
-    backend_missing: "待接入",
-    needs_config: "待配置",
-    unsupported: "不支持",
-  };
-  return labels[value] ?? (value || "等待");
-}
-
-interface DocumentArtifact {
-  label: string;
-  workspaceName: string;
-}
-
-function documentResultArtifacts(result: DocumentResult | null, scanResult: ScanResult | null): DocumentArtifact[] {
-  const artifacts: DocumentArtifact[] = [];
-  const add = (label: string, value: unknown) => {
-    if (typeof value !== "string" || !value.trim()) return;
-    const workspaceName = workspaceArtifactPath(value);
-    if (!workspaceName) return;
-    artifacts.push({ label, workspaceName });
-  };
-  add("分析结果", result?.analysis_path);
-  add("文档摘要", result?.summary_path);
-  add("汇报提纲", result?.outline_path);
-  add("关键数据表", result?.table_path);
-  add("扫描纪要", scanResult?.summary_path);
-  add("OCR 文本", scanResult?.text_path);
-  add("扫描结构", scanResult?.structure_path);
-  (scanResult?.table_paths ?? []).forEach((path, index) => add(`扫描表格 ${index + 1}`, path));
-  (result?.outputs ?? []).forEach((output) => add(outputArtifactLabel(output.path, output.type), output.path));
-  return uniqueDocumentArtifacts(artifacts);
-}
-
-function outputArtifactLabel(pathValue: string, type: string) {
-  const lower = `${pathValue} ${type}`.toLowerCase();
-  if (lower.includes("outline")) return "汇报提纲";
-  if (lower.includes("analysis")) return "分析结果";
-  if (lower.includes("summary") || lower.includes("minutes")) return "纪要/摘要";
-  if (lower.includes("table") || lower.endsWith(".csv")) return "关键数据表";
-  return type ? `输出：${type}` : "输出文件";
-}
-
-function workspaceArtifactPath(pathValue: string) {
-  const normalized = String(pathValue || "").trim().replace(/\\/g, "/");
-  const marker = "/workspace/";
-  const markerIndex = normalized.lastIndexOf(marker);
-  if (markerIndex >= 0) return normalized.slice(markerIndex + marker.length);
-  const runtimeMarker = "/lelamp_runtime/workspace/";
-  const runtimeIndex = normalized.lastIndexOf(runtimeMarker);
-  if (runtimeIndex >= 0) return normalized.slice(runtimeIndex + runtimeMarker.length);
-  return normalized.replace(/^\.\//, "");
-}
-
-function uniqueDocumentArtifacts(artifacts: DocumentArtifact[]) {
-  const seen = new Set<string>();
-  return artifacts.filter((artifact) => {
-    if (seen.has(artifact.workspaceName)) return false;
-    seen.add(artifact.workspaceName);
-    return true;
+  const [selectedId, setSelectedId] = useState(() => new URLSearchParams(window.location.search).get("document") ?? "");
+  const [selected, setSelected] = useState<CollaborativeDocument | null>(null);
+  const [libraryView, setLibraryView] = useState<LibraryView>("recent");
+  const [activeFolder, setActiveFolder] = useState("");
+  const [folders, setFolders] = useState<DocumentFolder[]>(() => loadDocumentFolders());
+  const [expandedViews, setExpandedViews] = useState<LibraryView[]>(["mine", "meeting", "scan"]);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(() => Number(localStorage.getItem("lelamp-docs-sidebar-width")) || 224);
+  const [inspector, setInspector] = useState<InspectorView>("comments");
+  const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [query, setQuery] = useState("");
+  const [saveState, setSaveState] = useState<SaveState>("saved");
+  const [notice, setNotice] = useState("");
+  const [comments, setComments] = useState<DocumentComment[]>([]);
+  const [revisions, setRevisions] = useState<DocumentRevision[]>([]);
+  const [attachments, setAttachments] = useState<DocumentAttachment[]>([]);
+  const [commentDraft, setCommentDraft] = useState("");
+  const [collaboratorId, setCollaboratorId] = useState("");
+  const [collaboratorRole, setCollaboratorRole] = useState<"editor" | "commenter" | "viewer">("editor");
+  const [aiSuggestion, setAiSuggestion] = useState<{ operation: string; label: string; text: string; baseVersion: number } | null>(null);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [widePage, setWidePage] = useState(false);
+  const [revisionPreview, setRevisionPreview] = useState<DocumentRevision | null>(null);
+  const uploadController = useRef<AbortController | null>(null);
+  const [slashOpen, setSlashOpen] = useState(false);
+  const [mentionOpen, setMentionOpen] = useState(false);
+  const [newMenuOpen, setNewMenuOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importPath, setImportPath] = useState("");
+  const [busy, setBusy] = useState(false);
+  const saveTimer = useRef<number | null>(null);
+  const currentVersion = useRef(0);
+  const loadingDocument = useRef(false);
+  const {
+    collaborationState, setCollaborationState, onlineMembers, setOnlineMembers,
+    collaborationText, collaborationMetadata, collaborationProvider,
+    collaborationOrigin, collaborationClientId,
+  } = useDocumentCollaboration();
+  const clearSelection = useCallback(() => setSelectedId(""), []);
+  const { documents, setDocuments, loading, error, setError, reloadDocuments: loadList } = useDocumentWorkspace({
+    libraryView, activeFolder, query, selectedId, clearSelection,
   });
-}
 
-function isDocumentAnalysisSupported(pathValue: string) {
-  const suffix = fileSuffix(pathValue);
-  return new Set([
-    ".txt",
-    ".md",
-    ".markdown",
-    ".csv",
-    ".tsv",
-    ".json",
-    ".jsonl",
-    ".yaml",
-    ".yml",
-    ".log",
-    ".html",
-    ".xml",
-    ".pdf",
-    ".docx",
-    ".pptx",
-    ".xlsx",
-  ]).has(suffix);
-}
-
-function fileSuffix(pathValue: string) {
-  const name = String(pathValue || "").replace(/\\/g, "/").split("/").pop() || "";
-  const dot = name.lastIndexOf(".");
-  return dot >= 0 ? name.slice(dot).toLowerCase() : "";
-}
-
-function compactDisplayPath(value?: string) {
-  const text = String(value ?? "");
-  if (!text) return "-";
-  const normalized = text.replace(/\\/g, "/");
-  const workspaceMarker = "/workspace/";
-  const workspaceIndex = normalized.lastIndexOf(workspaceMarker);
-  if (workspaceIndex >= 0) return normalized.slice(workspaceIndex + 1);
-  const parts = normalized.split("/").filter(Boolean);
-  if (parts.length <= 2) return normalized;
-  return `.../${parts.slice(-2).join("/")}`;
-}
-
-function scanEnhancement(scanResult: ScanResult | null): Record<string, unknown> | null {
-  if (!scanResult) return null;
-  if (scanResult.enhancement && typeof scanResult.enhancement === "object") return scanResult.enhancement;
-  return scanResult;
-}
-
-function scanCorrection(scanResult: ScanResult | null): Record<string, unknown> {
-  const enhancement = scanEnhancement(scanResult);
-  const correction = enhancement?.auto_corner_correction;
-  return correction && typeof correction === "object" ? correction as Record<string, unknown> : {};
-}
-
-function scanWorkspaceValue(scanResult: ScanResult | null, key: string): string {
-  const enhancement = scanEnhancement(scanResult);
-  const value = enhancement?.[key];
-  return typeof value === "string" ? value : "";
-}
-
-function workspaceImageUrl(workspaceName: string): string {
-  const token = readToken();
-  const params = new URLSearchParams({ file: workspaceName });
-  if (token) params.set("token", token);
-  return `/api/scene/image?${params.toString()}`;
-}
-
-function ScanArtifactLinks({ scanResult }: { scanResult: ScanResult | null }) {
-  const correction = scanCorrection(scanResult);
-  const cornerPreview = scanWorkspaceValue(scanResult, "corner_preview_workspace_name") || String(correction.preview_workspace_name ?? "");
-  const colorScan = scanWorkspaceValue(scanResult, "color_workspace_name") || scanWorkspaceValue(scanResult, "enhanced_workspace_name");
-  const ocrScan = scanWorkspaceValue(scanResult, "ocr_workspace_name");
-  const links = [
-    ["四角预览", cornerPreview],
-    ["矫正扫描图", colorScan],
-    ["OCR 增强图", ocrScan],
-  ].filter(([, workspaceName]) => workspaceName);
-  if (!links.length) return null;
-  return (
-    <div className="scan-artifact-links">
-      {links.map(([label, workspaceName]) => (
-        <a className="ghost-button" key={label} href={workspaceImageUrl(workspaceName)} target="_blank" rel="noreferrer">
-          {label}
-        </a>
-      ))}
-    </div>
-  );
-}
-
-async function fileToDataUrl(file: File): Promise<string> {
-  return await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error ?? new Error("读取图片失败"));
-    reader.onload = () => {
-      if (typeof reader.result !== "string") {
-        reject(new Error("无法生成图片数据"));
-        return;
+  const editor = useEditor({
+    extensions: [
+      StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
+      Placeholder.configure({ placeholder: "输入内容，或输入 / 插入标题、列表、引用和代码块…" }),
+      TaskList,
+      TaskItem.configure({ nested: true }),
+      Table.configure({ resizable: true }),
+      TableRow,
+      TableHeader,
+      TableCell,
+      Image.configure({ allowBase64: true }),
+      Link.configure({ openOnClick: false, autolink: true, linkOnPaste: true }),
+      CalloutExtension,
+      RemoteCursorExtension,
+    ],
+    content: "<p></p>",
+    editable: false,
+    editorProps: {
+      attributes: { class: "collab-prose", spellcheck: "true", "aria-label": "文档正文编辑器" },
+      handlePaste(view, event) {
+        const image = [...(event.clipboardData?.files ?? [])].find((file) => file.type.startsWith("image/"));
+        if (!image) return false;
+        insertLocalImage(view, image, setError);
+        return true;
+      },
+      handleDrop(view, event) {
+        const image = [...(event.dataTransfer?.files ?? [])].find((file) => file.type.startsWith("image/"));
+        if (!image) return false;
+        event.preventDefault();
+        insertLocalImage(view, image, setError);
+        return true;
+      },
+    },
+    onUpdate: ({ editor: activeEditor }) => {
+      if (loadingDocument.current || !selected?.can_edit) return;
+      const markdown = htmlToMarkdown(activeEditor.getHTML());
+      if (collaborationText.current && collaborationText.current.toString() !== markdown) {
+        updateSharedText(collaborationText.current, markdown, collaborationOrigin.current);
       }
-      resolve(reader.result);
+      const text = activeEditor.state.doc.textBetween(0, activeEditor.state.doc.content.size, "\n");
+      setSlashOpen(text.endsWith("/"));
+      setMentionOpen(text.endsWith("@"));
+      setSaveState("dirty");
+      if (saveTimer.current) window.clearTimeout(saveTimer.current);
+      saveTimer.current = window.setTimeout(() => void saveDocument(activeEditor.getHTML()), 900);
+    },
+    onSelectionUpdate: ({ editor: activeEditor }) => {
+      collaborationProvider.current?.setAwarenessField("selection", {
+        from: activeEditor.state.selection.from,
+        to: activeEditor.state.selection.to,
+      });
+    },
+  });
+
+  function navigateLibrary(view: LibraryView, folderId = "") {
+    setLibraryView(view);
+    setActiveFolder(folderId);
+    setSelectedId("");
+    setQuery("");
+  }
+
+  function createSubfolder(view: LibraryView) {
+    const name = window.prompt(`在“${libraryTitle(view)}”下新建文件夹`, "新建文件夹")?.trim();
+    if (!name) return;
+    const next = [...folders, { id: `folder-${randomId()}`, name: name.slice(0, 40), view }];
+    setFolders(next);
+    localStorage.setItem(DOCUMENT_FOLDERS_KEY, JSON.stringify(next));
+    setExpandedViews((items) => items.includes(view) ? items : [...items, view]);
+    setNotice(`文件夹“${name}”已创建`);
+  }
+
+  function beginSidebarResize(event: ReactPointerEvent<HTMLDivElement>) {
+    event.preventDefault();
+    const move = (pointerEvent: PointerEvent) => {
+      const width = Math.max(180, Math.min(420, pointerEvent.clientX));
+      setSidebarWidth(width);
     };
-    reader.readAsDataURL(file);
-  });
+    const stop = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      setSidebarWidth((width) => {
+        localStorage.setItem("lelamp-docs-sidebar-width", String(width));
+        return width;
+      });
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop);
+  }
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void loadList(), 250);
+    return () => window.clearTimeout(timer);
+  }, [loadList]);
+
+  useEffect(() => {
+    if (!selectedId || !editor) {
+      setSelected(null);
+      editor?.commands.setContent("<p></p>");
+      editor?.setEditable(false);
+      return;
+    }
+    loadingDocument.current = true;
+    setError("");
+    void Promise.all([
+      getCollaborativeDocument(selectedId),
+      listDocumentComments(selectedId),
+      listDocumentHistory(selectedId),
+      listDocumentAttachments(selectedId),
+    ])
+      .then(([documentResponse, commentResponse, historyResponse, attachmentResponse]) => {
+        const document = documentResponse.data.document;
+        setSelected(document);
+        currentVersion.current = document.content_version;
+        editor.commands.setContent(markdownToHtml(document.content ?? ""));
+        editor.setEditable(document.can_edit);
+        setComments(commentResponse.data.comments);
+        setRevisions(historyResponse.data.revisions);
+        setAttachments(attachmentResponse.data.attachments);
+        setSaveState("saved");
+      })
+      .catch((err) => setError(apiErrorMessage(err)))
+      .finally(() => {
+        loadingDocument.current = false;
+      });
+  }, [editor, selectedId]);
+
+  useEffect(() => {
+    collaborationProvider.current?.destroy();
+    collaborationProvider.current = null;
+    collaborationText.current = null;
+    collaborationMetadata.current = null;
+    setOnlineMembers([]);
+    if (!selectedId || !editor || !selected) return;
+    let disposed = false;
+    setCollaborationState("connecting");
+    void getDocumentCollaborationSession(selectedId, collaborationClientId.current)
+      .then((response) => {
+        if (disposed) return;
+        const session = response.data;
+        const ydoc = new Y.Doc();
+        const provider = new HocuspocusProvider({
+          url: session.url,
+          name: selectedId,
+          document: ydoc,
+          token: session.token,
+        });
+        const sharedText = ydoc.getText("markdown");
+        const sharedMetadata = ydoc.getMap("metadata");
+        collaborationProvider.current = provider;
+        collaborationText.current = sharedText;
+        collaborationMetadata.current = sharedMetadata;
+        provider.setAwarenessField("user", session.user);
+        const updateMembers = () => {
+          const awarenessStates = Array.from(provider.awareness?.getStates().entries() ?? []);
+          const members = awarenessStates
+            .map(([, state]) => state.user as { id: string; name: string; color: string } | undefined)
+            .filter((user): user is { id: string; name: string; color: string } => Boolean(user?.id));
+          setOnlineMembers(Array.from(new Map(members.map((member) => [member.id, member])).values()));
+          const cursors = awarenessStates.flatMap(([clientId, state]) => {
+            const user = state.user as { id?: string; name?: string; color?: string } | undefined;
+            const selection = state.selection as { from?: number; to?: number } | undefined;
+            if (clientId === ydoc.clientID || !user?.id || !selection) return [];
+            return [{
+              id: user.id,
+              name: user.name || "协作者",
+              color: user.color || "#3370ff",
+              from: Number(selection.from || 1),
+              to: Number(selection.to || selection.from || 1),
+            }];
+          });
+          editor.view.dispatch(editor.state.tr.setMeta(remoteCursorPluginKey, cursors));
+        };
+        provider.on("status", ({ status }: { status: string }) => setCollaborationState(status === "connected" ? "online" : "connecting"));
+        provider.on("disconnect", () => setCollaborationState("offline"));
+        provider.on("awarenessUpdate", updateMembers);
+        provider.on("synced", () => {
+          const collaborationVersion = Number(sharedMetadata.get("content_version") || 0);
+          if (!sharedText.length || selected.content_version > collaborationVersion) {
+            ydoc.transact(() => {
+              updateSharedText(sharedText, selected.content ?? "", collaborationOrigin.current);
+              sharedMetadata.set("content_version", selected.content_version);
+            }, collaborationOrigin.current);
+          } else if (sharedText.length && sharedText.toString() !== htmlToMarkdown(editor.getHTML())) {
+            loadingDocument.current = true;
+            editor.commands.setContent(markdownToHtml(sharedText.toString()));
+            loadingDocument.current = false;
+          }
+          setCollaborationState("online");
+          updateMembers();
+        });
+        sharedText.observe((event) => {
+          if (event.transaction.origin === collaborationOrigin.current) return;
+          const markdown = sharedText.toString();
+          if (markdown === htmlToMarkdown(editor.getHTML())) return;
+          loadingDocument.current = true;
+          editor.commands.setContent(markdownToHtml(markdown));
+          loadingDocument.current = false;
+          setSaveState("dirty");
+          if (saveTimer.current) window.clearTimeout(saveTimer.current);
+          saveTimer.current = window.setTimeout(() => void saveDocument(editor.getHTML()), 900);
+        });
+      })
+      .catch(() => setCollaborationState("offline"));
+    return () => {
+      disposed = true;
+      collaborationProvider.current?.destroy();
+      collaborationProvider.current = null;
+      collaborationText.current = null;
+      collaborationMetadata.current = null;
+    };
+  }, [editor, selected?.id, selectedId]);
+
+  useEffect(() => {
+    if (!selectedId || saveState === "dirty" || saveState === "saving") return;
+    const timer = window.setInterval(() => {
+      void getCollaborativeDocument(selectedId).then((response) => {
+        const remote = response.data.document;
+        if (remote.content_version > currentVersion.current && editor) {
+          loadingDocument.current = true;
+          editor.commands.setContent(markdownToHtml(remote.content ?? ""));
+          currentVersion.current = remote.content_version;
+          setSelected(remote);
+          setNotice("已同步其他位置的修改");
+          window.setTimeout(() => setNotice(""), 1800);
+          loadingDocument.current = false;
+        }
+      }).catch(() => setSaveState(navigator.onLine ? "offline" : "offline"));
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [editor, saveState, selectedId]);
+
+  async function saveDocument(html = editor?.getHTML() ?? "") {
+    if (!selectedId || !selected?.can_edit || loadingDocument.current) return;
+    setSaveState("saving");
+    try {
+      const content = htmlToMarkdown(html);
+      const response = await updateCollaborativeDocument(selectedId, {
+        content,
+        base_version: currentVersion.current,
+        summary: "自动保存",
+      });
+      currentVersion.current = response.data.document.content_version;
+      collaborationMetadata.current?.set("content_version", response.data.document.content_version);
+      setSelected(response.data.document);
+      setSaveState("saved");
+    } catch (err) {
+      if (err instanceof ApiClientError && err.code === "document_version_conflict") {
+        try {
+          const latest = (await getCollaborativeDocument(selectedId)).data.document;
+          const mergedContent = collaborationText.current?.toString() || htmlToMarkdown(html);
+          const retried = await updateCollaborativeDocument(selectedId, {
+            content: mergedContent,
+            base_version: latest.content_version,
+            summary: "合并协作修改",
+          });
+          currentVersion.current = retried.data.document.content_version;
+          collaborationMetadata.current?.set("content_version", retried.data.document.content_version);
+          setSelected(retried.data.document);
+          setSaveState("saved");
+          setNotice("已合并其他协作者的修改");
+          return;
+        } catch (retryError) {
+          setError(apiErrorMessage(retryError));
+          setSaveState("conflict");
+          return;
+        }
+      }
+      const message = apiErrorMessage(err);
+      setError(message);
+      setSaveState(message.includes("其他位置") || message.includes("同步") ? "conflict" : "offline");
+    }
+  }
+
+  async function renameDocument(title: string) {
+    if (!selected || title.trim() === selected.title) return;
+    try {
+      const response = await updateCollaborativeDocument(selected.id, { title: title.trim() || "无标题文档", summary: "修改标题" });
+      setSelected(response.data.document);
+      setDocuments((items) => items.map((item) => item.id === selected.id ? response.data.document : item));
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    }
+  }
+
+  async function createDocument(template: "" | "meeting" | "project" | "weekly" = "") {
+    setBusy(true);
+    setError("");
+    try {
+      const labels = { "": "无标题文档", meeting: "会议记录", project: "项目计划", weekly: "周报" };
+      const response = await createCollaborativeDocument({
+        title: labels[template],
+        template,
+        idempotency_key: randomId(),
+        space_id: activeFolder || "personal",
+      });
+      setNewMenuOpen(false);
+      if (!activeFolder) setLibraryView("recent");
+      await loadList();
+      setSelectedId(response.data.document.id);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function importMarkdown() {
+    if (!importPath.trim()) return;
+    setBusy(true);
+    setError("");
+    try {
+      const response = await createCollaborativeDocument({
+        title: "",
+        source_path: importPath.trim(),
+        source_type: "imported",
+        idempotency_key: randomId(),
+      });
+      setImportOpen(false);
+      setImportPath("");
+      await loadList();
+      setSelectedId(response.data.document.id);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function migrateExistingMarkdown() {
+    if (!window.confirm("扫描工作区并复制导入现有 Markdown？原文件不会修改或删除。")) return;
+    setBusy(true);
+    setError("");
+    try {
+      const response = await migrateWorkspaceMarkdown();
+      setNotice(`已迁移 ${response.data.imported_count} 个文档${response.data.error_count ? `，${response.data.error_count} 个失败` : ""}`);
+      setImportOpen(false);
+      await loadList();
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function moveToTrash() {
+    if (!selected || !window.confirm(`将“${selected.title}”移入回收站？之后可以恢复。`)) return;
+    await trashCollaborativeDocument(selected.id);
+    setSelectedId("");
+    await loadList();
+  }
+
+  async function restoreDocument() {
+    if (!selected) return;
+    await restoreDocumentById(selected);
+  }
+
+  async function purgeDocument() {
+    if (!selected) return;
+    await purgeDocumentById(selected);
+  }
+
+  async function restoreDocumentById(document: CollaborativeDocument) {
+    try {
+      await restoreCollaborativeDocument(document.id);
+      setSelectedId("");
+      await loadList();
+      setNotice(`“${document.title}”已恢复`);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    }
+  }
+
+  async function purgeDocumentById(document: CollaborativeDocument) {
+    if (!window.confirm(`永久删除“${document.title}”？此操作无法恢复。`)) return;
+    try {
+      await purgeCollaborativeDocument(document.id);
+      setSelectedId("");
+      await loadList();
+      setNotice(`“${document.title}”已永久删除`);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    }
+  }
+
+  async function toggleFavorite() {
+    if (!selected) return;
+    try {
+      const response = await setCollaborativeDocumentFavorite(selected.id, !selected.favorite);
+      setSelected(response.data.document);
+      setDocuments((items) => items.map((item) => item.id === selected.id ? response.data.document : item));
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    }
+  }
+
+  async function duplicateDocument() {
+    if (!selected || !editor) return;
+    setBusy(true);
+    try {
+      const response = await createCollaborativeDocument({
+        title: `${selected.title} 副本`,
+        content: htmlToMarkdown(editor.getHTML()),
+        source_type: "manual",
+        space_id: selected.space_id,
+        idempotency_key: randomId(),
+      });
+      await loadList();
+      setSelectedId(response.data.document.id);
+      setNotice("已创建文档副本");
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function addComment() {
+    if (!selected || !commentDraft.trim()) return;
+    setBusy(true);
+    try {
+      const anchor = editor?.state.doc.textBetween(editor.state.selection.from, editor.state.selection.to, " ").trim() ?? "";
+      await addDocumentComment(selected.id, { body: commentDraft, anchor_text: anchor });
+      setCommentDraft("");
+      setComments((await listDocumentComments(selected.id)).data.comments);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleComment(comment: DocumentComment) {
+    if (!selected) return;
+    await updateDocumentComment(selected.id, comment.id, { resolved: !comment.resolved });
+    setComments((await listDocumentComments(selected.id)).data.comments);
+  }
+
+  async function replyToComment(comment: DocumentComment) {
+    if (!selected) return;
+    const body = window.prompt("输入回复内容");
+    if (!body?.trim()) return;
+    try {
+      await addDocumentComment(selected.id, { body: body.trim(), parent_id: comment.id });
+      setComments((await listDocumentComments(selected.id)).data.comments);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    }
+  }
+
+  async function saveCollaborator() {
+    if (!selected || !collaboratorId.trim()) return;
+    const existing = selected.permissions ?? [];
+    const next: DocumentPermission[] = [
+      ...existing.filter((item) => item.principal_id !== collaboratorId.trim()),
+      {
+        principal_type: "user",
+        principal_id: collaboratorId.trim(),
+        display_name: collaboratorId.trim(),
+        role: collaboratorRole,
+      },
+    ];
+    try {
+      const response = await setDocumentPermissions(selected.id, next);
+      setSelected({ ...selected, permissions: response.data.permissions });
+      setCollaboratorId("");
+      setNotice("协作权限已更新");
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    }
+  }
+
+  async function removeCollaborator(principalId: string) {
+    if (!selected) return;
+    const next = (selected.permissions ?? []).filter((item) => item.principal_id !== principalId);
+    try {
+      const response = await setDocumentPermissions(selected.id, next);
+      setSelected({ ...selected, permissions: response.data.permissions });
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    }
+  }
+
+  async function copyShareLink(principalId: string) {
+    if (!selected) return;
+    try {
+      const response = await createDocumentShareLink(selected.id, principalId);
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(response.data.share_url);
+        setNotice("文档级分享链接已复制，7 天内有效");
+      } else {
+        window.prompt("复制文档级分享链接（7 天内有效）", response.data.share_url);
+      }
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    }
+  }
+
+  async function restoreRevision(revision: DocumentRevision) {
+    if (!selected || !window.confirm(`恢复“${formatTime(revision.created_at)}”的版本？当前内容仍会保留在历史中。`)) return;
+    const response = await restoreDocumentRevision(selected.id, revision.id);
+    const document = response.data.document;
+    setSelected(document);
+    currentVersion.current = document.content_version;
+    loadingDocument.current = true;
+    editor?.commands.setContent(markdownToHtml(document.content ?? ""));
+    loadingDocument.current = false;
+    setRevisions((await listDocumentHistory(selected.id)).data.revisions);
+  }
+
+  async function previewRevision(revision: DocumentRevision) {
+    if (!selected) return;
+    try {
+      setRevisionPreview((await getDocumentRevision(selected.id, revision.id)).data.revision);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    }
+  }
+
+  async function uploadAttachment(file: File | undefined) {
+    if (!selected || !file) return;
+    if (file.size > 20 * 1024 * 1024) {
+      setError("附件不能超过 20 MB。");
+      return;
+    }
+    setBusy(true);
+    setUploadProgress(0);
+    uploadController.current = new AbortController();
+    try {
+      await uploadDocumentAttachment(selected.id, file, {
+        signal: uploadController.current.signal,
+        onProgress: setUploadProgress,
+      });
+      setAttachments((await listDocumentAttachments(selected.id)).data.attachments);
+      setNotice("附件已上传");
+    } catch (err) {
+      setError(err instanceof DOMException && err.name === "AbortError" ? "附件上传已取消。" : apiErrorMessage(err));
+    } finally {
+      setBusy(false);
+      setUploadProgress(null);
+      uploadController.current = null;
+    }
+  }
+
+  async function downloadAttachment(attachment: DocumentAttachment) {
+    if (!selected) return;
+    try {
+      const downloaded = await downloadDocumentAttachment(selected.id, attachment.id);
+      const bytes = new Uint8Array(downloaded.content.byteLength);
+      bytes.set(downloaded.content);
+      const url = URL.createObjectURL(new Blob([bytes.buffer], { type: attachment.mime_type }));
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = attachment.filename;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    }
+  }
+
+  async function downloadMarkdown() {
+    if (!selected) return;
+    const exported = await exportDocumentMarkdown(selected.id);
+    const url = URL.createObjectURL(new Blob([exported.content], { type: "text/markdown;charset=utf-8" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = exported.filename;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function downloadHtml() {
+    if (!selected) return;
+    const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${escapeHtml(selected.title)}</title><style>body{max-width:820px;margin:48px auto;padding:0 24px;font:16px/1.75 system-ui;color:#1f2329}img{max-width:100%}pre{padding:16px;background:#f5f6f7;border-radius:8px;overflow:auto}table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:8px}</style></head><body>${editor?.getHTML() ?? ""}</body></html>`;
+    downloadBlob(new Blob([html], { type: "text/html;charset=utf-8" }), `${safeDownloadName(selected.title)}.html`);
+  }
+
+  function printPdf() {
+    if (!selected) return;
+    const popup = window.open("", "_blank", "noopener,noreferrer");
+    if (!popup) {
+      setError("浏览器阻止了打印窗口，请允许弹窗后重试。");
+      return;
+    }
+    popup.document.write(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${escapeHtml(selected.title)}</title><style>body{max-width:820px;margin:36px auto;font:15px/1.7 system-ui;color:#111}img{max-width:100%}@page{margin:18mm}pre{white-space:pre-wrap}</style></head><body><h1>${escapeHtml(selected.title)}</h1>${editor?.getHTML() ?? ""}<script>window.onload=()=>setTimeout(()=>window.print(),150)<\/script></body></html>`);
+    popup.document.close();
+  }
+
+  async function downloadDocx() {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      const { Document, HeadingLevel, Packer, Paragraph, TextRun } = await import("docx");
+      const markdown = htmlToMarkdown(editor?.getHTML() ?? "");
+      const paragraphs = markdown.split(/\r?\n/).map((line) => {
+        const heading = /^(#{1,3})\s+(.+)$/.exec(line);
+        if (heading) {
+          const levels = [HeadingLevel.HEADING_1, HeadingLevel.HEADING_2, HeadingLevel.HEADING_3];
+          return new Paragraph({ text: heading[2], heading: levels[heading[1].length - 1] });
+        }
+        const bullet = /^[-*]\s+(.+)$/.exec(line);
+        if (bullet) return new Paragraph({ children: [new TextRun(bullet[1])], bullet: { level: 0 } });
+        return new Paragraph({ children: [new TextRun(line)] });
+      });
+      const blob = await Packer.toBlob(new Document({ sections: [{ children: paragraphs }] }));
+      downloadBlob(blob, `${safeDownloadName(selected.title)}.docx`);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function requestAiSuggestion(operation: string, label: string) {
+    if (!selected || !editor) return;
+    const selectedText = editor.state.doc.textBetween(editor.state.selection.from, editor.state.selection.to, "\n").trim();
+    setAiBusy(true);
+    setError("");
+    try {
+      const response = await generateDocumentAiSuggestion(selected.id, {
+        operation,
+        selected_text: selectedText || undefined,
+      });
+      setAiSuggestion({
+        operation,
+        label,
+        text: response.data.suggestion,
+        baseVersion: response.data.base_version,
+      });
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setAiBusy(false);
+    }
+  }
+
+  async function acceptAiSuggestion(mode: "replace" | "insert") {
+    if (!selected || !editor || !aiSuggestion) return;
+    loadingDocument.current = true;
+    if (mode === "replace" && !editor.state.selection.empty) {
+      editor.chain().focus().deleteSelection().insertContent(markdownToHtml(aiSuggestion.text)).run();
+    } else {
+      editor.chain().focus().insertContent(markdownToHtml(`\n\n${aiSuggestion.text}\n`)).run();
+    }
+    loadingDocument.current = false;
+    if (saveTimer.current) window.clearTimeout(saveTimer.current);
+    setAiBusy(true);
+    try {
+      const response = await applyDocumentAiSuggestion(selected.id, {
+        operation: aiSuggestion.operation,
+        content: htmlToMarkdown(editor.getHTML()),
+        base_version: aiSuggestion.baseVersion,
+        mode,
+      });
+      currentVersion.current = response.data.document.content_version;
+      setSelected(response.data.document);
+      setSaveState("saved");
+      setAiSuggestion(null);
+      setRevisions((await listDocumentHistory(selected.id)).data.revisions);
+      setNotice("AI 建议已写入，可从历史版本恢复");
+    } catch (err) {
+      setError(apiErrorMessage(err));
+      setSaveState("conflict");
+    } finally {
+      setAiBusy(false);
+    }
+  }
+
+  function insertSlashBlock(kind: "h1" | "h2" | "bullet" | "task" | "quote" | "code" | "table" | "image" | "link" | "divider" | "callout") {
+    if (!editor) return;
+    const from = editor.state.selection.from;
+    if (editor.state.doc.textBetween(Math.max(0, from - 1), from) === "/") editor.commands.deleteRange({ from: from - 1, to: from });
+    const chain = editor.chain().focus();
+    if (kind === "h1") chain.setHeading({ level: 1 }).run();
+    if (kind === "h2") chain.setHeading({ level: 2 }).run();
+    if (kind === "bullet") chain.toggleBulletList().run();
+    if (kind === "task") chain.toggleTaskList().run();
+    if (kind === "quote") chain.toggleBlockquote().run();
+    if (kind === "code") chain.toggleCodeBlock().run();
+    if (kind === "table") chain.insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
+    if (kind === "divider") chain.setHorizontalRule().run();
+    if (kind === "callout") chain.insertContent('<aside data-type="callout"><p>提示内容</p></aside>').run();
+    if (kind === "image") {
+      const url = window.prompt("输入图片地址");
+      if (url?.trim()) chain.setImage({ src: url.trim(), alt: "文档图片" }).run();
+    }
+    if (kind === "link") {
+      const url = window.prompt("输入链接地址");
+      if (url?.trim()) chain.setLink({ href: url.trim() }).run();
+    }
+    setSlashOpen(false);
+  }
+
+  function insertDocumentReference(documentItem: CollaborativeDocument) {
+    if (!editor) return;
+    const from = editor.state.selection.from;
+    if (editor.state.doc.textBetween(Math.max(0, from - 1), from) === "@") {
+      editor.commands.deleteRange({ from: from - 1, to: from });
+    }
+    editor.chain().focus().insertContent(
+      `<a href="/documents?document=${encodeURIComponent(documentItem.id)}">@${escapeHtml(documentItem.title)}</a>&nbsp;`,
+    ).run();
+    setMentionOpen(false);
+  }
+
+  function insertMemberMention(permission: DocumentPermission) {
+    if (!editor) return;
+    const from = editor.state.selection.from;
+    if (editor.state.doc.textBetween(Math.max(0, from - 1), from) === "@") {
+      editor.commands.deleteRange({ from: from - 1, to: from });
+    }
+    editor.chain().focus().insertContent(`<strong>@${escapeHtml(permission.display_name)}</strong>&nbsp;`).run();
+    setMentionOpen(false);
+  }
+
+  const sourceLabel = useMemo(() => {
+    if (!selected) return "";
+    if (selected.source_type === "meeting") return "会议记录";
+    if (selected.source_type === "imported") return "导入文档";
+    return "我的文档";
+  }, [selected]);
+
+  return (
+    <main
+      className={`docs-app ${inspectorOpen && selected ? "docs-app--inspector" : ""}${sidebarCollapsed ? " docs-app--nav-collapsed" : ""}`}
+      style={{ "--docs-sidebar-width": `${sidebarWidth}px` } as CSSProperties}
+    >
+      <aside className="docs-nav">
+        <div className="docs-nav__head">
+          <strong><span className="docs-brand-mark"><FileText size={16} /></span>云文档</strong>
+          <div className="docs-nav__head-actions">
+            <button className="docs-icon-button" onClick={() => setSidebarCollapsed(true)} aria-label="收起左侧栏" title="收起左侧栏"><PanelLeftClose size={18} /></button>
+            <div className="docs-new-wrap">
+            <button className="docs-icon-button docs-icon-button--primary" onClick={() => setNewMenuOpen((value) => !value)} aria-label="新建文档"><Plus size={19} /></button>
+            {newMenuOpen && (
+              <div className="docs-popover docs-template-menu">
+                <button onClick={() => void createDocument()}><FilePlus2 size={18} /><span><strong>空白文档</strong><small>从空白页面开始</small></span></button>
+                <button onClick={() => void createDocument("meeting")}><MessageSquare size={18} /><span><strong>会议记录</strong><small>摘要、决定和行动项</small></span></button>
+                <button onClick={() => void createDocument("project")}><ListChecks size={18} /><span><strong>项目计划</strong><small>目标、计划和风险</small></span></button>
+                <button onClick={() => void createDocument("weekly")}><FileText size={18} /><span><strong>周报</strong><small>进展、问题和下周计划</small></span></button>
+                <button onClick={() => { setImportOpen(true); setNewMenuOpen(false); }}><Download size={18} /><span><strong>导入 Markdown</strong><small>原文件保持不变</small></span></button>
+              </div>
+            )}
+            </div>
+          </div>
+        </div>
+        <nav className="docs-nav__links" aria-label="文档分类">
+          {([
+            ["recent", <Clock3 size={17} />],
+            ["mine", <FileText size={17} />],
+            ["shared", <Users size={17} />],
+            ["meeting", <MessageSquare size={17} />],
+            ["scan", <ImagePlus size={17} />],
+            ["favorite", <ArchiveRestore size={17} />],
+            ["trash", <Trash2 size={17} />],
+          ] as Array<[LibraryView, ReactNode]>).map(([view, icon]) => {
+            const viewFolders = folders.filter((folder) => folder.view === view);
+            const expanded = expandedViews.includes(view);
+            return (
+              <div className="docs-nav-group" key={view}>
+                <div className="docs-nav-group__row">
+                  <DocsNavButton active={libraryView === view && !activeFolder} onClick={() => navigateLibrary(view)} icon={icon} label={libraryTitle(view)} />
+                  <button className="docs-nav-group__toggle" onClick={() => setExpandedViews((items) => items.includes(view) ? items.filter((item) => item !== view) : [...items, view])} aria-label={`${expanded ? "收起" : "展开"}${libraryTitle(view)}`}>
+                    {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                  </button>
+                  <button className="docs-nav-group__add" onClick={() => createSubfolder(view)} aria-label={`在${libraryTitle(view)}下新建文件夹`} title="新建子文件夹"><FolderPlus size={14} /></button>
+                </div>
+                {expanded && viewFolders.length > 0 && (
+                  <div className="docs-nav-folders">
+                    {viewFolders.map((folder) => (
+                      <button className={activeFolder === folder.id ? "active" : ""} key={folder.id} onClick={() => navigateLibrary(view, folder.id)}>
+                        <Folder size={15} /><span>{folder.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </nav>
+        <div className="docs-nav__space">
+          <span>空间</span>
+          <button className="active"><span className="docs-space-dot" />个人空间</button>
+        </div>
+        <div className="docs-nav__footer">
+          <Users size={16} />
+          <span>本机工作空间</span>
+          <small>内容保存在设备内</small>
+        </div>
+      </aside>
+      {!sidebarCollapsed && <div className="docs-nav-resizer" onPointerDown={beginSidebarResize} title="拖动调整侧栏宽度" />}
+      {sidebarCollapsed && <button className="docs-nav-open" onClick={() => setSidebarCollapsed(false)} aria-label="展开左侧栏" title="展开左侧栏"><PanelLeftOpen size={19} /></button>}
+
+      {!selected ? (
+        <section className="docs-library">
+          <header className="docs-library__header">
+            <div>
+              <h1>{libraryTitle(libraryView)}</h1>
+              <p>{libraryView === "trash" ? "已删除的文档会保留在这里，可恢复或永久删除。" : "创建、编辑和整理文档，所有操作都在当前应用内完成。"}</p>
+            </div>
+            {libraryView !== "trash" && <button className="docs-primary-button" onClick={() => setNewMenuOpen(true)}><Plus size={17} />新建文档</button>}
+          </header>
+          <div className="docs-search">
+            <Search size={17} />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={libraryView === "trash" ? "搜索已删除文档" : "搜索标题、正文或创建者"} />
+            <kbd>⌘ K</kbd>
+          </div>
+          {libraryView !== "trash" && (
+            <section className="docs-template-strip">
+              <header><strong>从模板开始</strong><span>快速创建常用文档</span></header>
+              <div>
+                <button onClick={() => void createDocument()}><span className="docs-template-icon docs-template-icon--blank"><Plus size={22} /></span><b>空白文档</b><small>自由开始创作</small></button>
+                <button onClick={() => void createDocument("meeting")}><span className="docs-template-icon docs-template-icon--meeting"><MessageSquare size={21} /></span><b>会议记录</b><small>摘要与行动项</small></button>
+                <button onClick={() => void createDocument("project")}><span className="docs-template-icon docs-template-icon--project"><ListChecks size={21} /></span><b>项目计划</b><small>目标与里程碑</small></button>
+                <button onClick={() => void createDocument("weekly")}><span className="docs-template-icon docs-template-icon--weekly"><FileText size={21} /></span><b>工作周报</b><small>进展与下周计划</small></button>
+              </div>
+            </section>
+          )}
+          {error && <div className="docs-error">{error}</div>}
+          <div className="docs-list-section-title">
+            <strong>{libraryTitle(libraryView)}</strong>
+            <span>{libraryView === "trash" ? `${documents.length} 个已删除文档` : `${documents.length} 个文档`}</span>
+          </div>
+          <div className={`docs-list-heading${libraryView === "trash" ? " docs-list-heading--trash" : ""}`}>
+            <span>名称</span><span>所属空间</span><span>{libraryView === "trash" ? "删除时间" : "更新时间"}</span>
+            {libraryView === "trash" && <span>操作</span>}
+          </div>
+          <DocumentList documents={documents} libraryView={libraryView} loading={loading}
+            selectDocument={setSelectedId} createDocument={() => createDocument()}
+            restoreDocument={restoreDocumentById} purgeDocument={purgeDocumentById} />
+        </section>
+      ) : (
+        <DocumentEditor
+          document={selected} saveState={saveState} notice={notice}
+          collaborationState={collaborationState} onlineMembers={onlineMembers} widePage={widePage}
+          goBack={() => setSelectedId("")} renameDocument={renameDocument}
+          openComments={() => { setInspector("comments"); setInspectorOpen(true); }}
+          openSharing={() => { setInspector("info"); setInspectorOpen(true); }}
+          toggleWidePage={() => setWidePage((value) => !value)}
+        >
+
+          <DocumentToolbar editor={editor} toggleInsertMenu={() => setSlashOpen((value) => !value)} uploadAttachment={uploadAttachment} />
+
+          {error && <div className="docs-error docs-error--editor">{error}<button onClick={() => setError("")}><X size={15} /></button></div>}
+          <div className={`docs-page-scroll ${widePage ? "docs-page-scroll--wide" : ""}`}>
+            {editor && getDocumentHeadings(editor).length > 1 && (
+              <nav className="docs-toc" aria-label="文档目录">
+                <strong>目录</strong>
+                {getDocumentHeadings(editor).map((heading) => (
+                  <button
+                    key={`${heading.position}:${heading.text}`}
+                    className={`docs-toc__level-${heading.level}`}
+                    onClick={() => editor.chain().focus().setTextSelection(heading.position + 1).scrollIntoView().run()}
+                  >
+                    {heading.text}
+                  </button>
+                ))}
+              </nav>
+            )}
+            <article className="docs-paper">
+              <div className="docs-paper__meta"><span>{sourceLabel}</span><span>由 {selected.owner_name} 创建</span><span>{formatTime(selected.updated_at)} 更新</span></div>
+              <EditorContent editor={editor} />
+              {slashOpen && (
+                <div className="docs-slash-menu">
+                  <strong>插入内容</strong>
+                  <button onClick={() => insertSlashBlock("h1")}><Heading1 size={18} /><span><b>一级标题</b><small>大标题</small></span></button>
+                  <button onClick={() => insertSlashBlock("h2")}><Heading2 size={18} /><span><b>二级标题</b><small>章节标题</small></span></button>
+                  <button onClick={() => insertSlashBlock("bullet")}><List size={18} /><span><b>无序列表</b><small>整理多个条目</small></span></button>
+                  <button onClick={() => insertSlashBlock("task")}><ListChecks size={18} /><span><b>待办事项</b><small>记录行动项</small></span></button>
+                  <button onClick={() => insertSlashBlock("quote")}><Quote size={18} /><span><b>引用</b><small>突出引用内容</small></span></button>
+                  <button onClick={() => insertSlashBlock("callout")}><Sparkles size={18} /><span><b>提示块</b><small>突出提醒或说明</small></span></button>
+                  <button onClick={() => insertSlashBlock("code")}><Code2 size={18} /><span><b>代码块</b><small>显示代码或命令</small></span></button>
+                  <button onClick={() => insertSlashBlock("table")}><Table2 size={18} /><span><b>表格</b><small>插入 Markdown 表格</small></span></button>
+                  <button onClick={() => insertSlashBlock("image")}><ImagePlus size={18} /><span><b>图片</b><small>插入图片地址</small></span></button>
+                  <button onClick={() => insertSlashBlock("link")}><Link2 size={18} /><span><b>链接</b><small>为选中内容添加链接</small></span></button>
+                  <button onClick={() => insertSlashBlock("divider")}><MoreHorizontal size={18} /><span><b>分割线</b><small>分隔不同章节</small></span></button>
+                </div>
+              )}
+              {mentionOpen && (
+                <div className="docs-slash-menu docs-mention-menu">
+                  <strong>提及成员或引用文档</strong>
+                  {(selected.permissions ?? []).filter((permission) => permission.principal_id !== selected.owner_id).slice(0, 5).map((permission) => (
+                    <button key={`member:${permission.principal_id}`} onClick={() => insertMemberMention(permission)}>
+                      <Users size={18} /><span><b>@{permission.display_name}</b><small>{roleLabel(permission.role)}</small></span>
+                    </button>
+                  ))}
+                  {documents.filter((item) => item.id !== selected.id).slice(0, 8).map((item) => (
+                    <button key={item.id} onClick={() => insertDocumentReference(item)}>
+                      <FileText size={18} /><span><b>{item.title}</b><small>{friendlySource(item.source_type)} · 稳定文档链接</small></span>
+                    </button>
+                  ))}
+                  {!documents.some((item) => item.id !== selected.id) && <small>没有其他可引用文档</small>}
+                </div>
+              )}
+            </article>
+          </div>
+        </DocumentEditor>
+      )}
+
+      {selected && inspectorOpen && (
+        <Suspense fallback={<aside className="docs-inspector docs-inspector--loading" aria-busy="true">正在加载文档信息…</aside>}>
+          <DocumentInspector model={{
+            selected, inspectorOpen, inspector, setInspector, setInspectorOpen,
+            commentDraft, setCommentDraft, busy, addComment, comments, replyToComment, toggleComment,
+            revisionPreview, setRevisionPreview, editor, revisions, previewRevision, restoreRevision,
+            copyShareLink, removeCollaborator, collaboratorId, setCollaboratorId, collaboratorRole,
+            setCollaboratorRole, saveCollaborator, attachments, downloadAttachment, uploadProgress,
+            uploadController, uploadAttachment, toggleFavorite, duplicateDocument, downloadMarkdown,
+            downloadHtml, printPdf, downloadDocx, restoreDocument, purgeDocument, moveToTrash,
+            aiBusy, requestAiSuggestion, aiSuggestion, setAiSuggestion, acceptAiSuggestion,
+          }} />
+        </Suspense>
+      )}
+      {importOpen && (
+        <div className="docs-modal-backdrop" role="dialog" aria-modal="true" aria-label="导入 Markdown">
+          <div className="docs-modal">
+            <header><div><h2>导入 Markdown</h2><p>复制内容生成新文档，原文件不会被修改。</p></div><button className="docs-icon-button" onClick={() => setImportOpen(false)}><X size={18} /></button></header>
+            <label>工作区文件路径<input value={importPath} onChange={(event) => setImportPath(event.target.value)} placeholder="例如：meetings/会议记录/项目周会.md" autoFocus /></label>
+            <footer>
+              <button className="docs-secondary-button" onClick={() => void migrateExistingMarkdown()} disabled={busy}>迁移工作区全部 Markdown</button>
+              <button className="docs-secondary-button" onClick={() => setImportOpen(false)}>取消</button>
+              <button className="docs-primary-button" onClick={() => void importMarkdown()} disabled={!importPath.trim() || busy}>导入文档</button>
+            </footer>
+          </div>
+        </div>
+      )}
+    </main>
+  );
 }

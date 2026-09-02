@@ -155,13 +155,11 @@
 - Epson projector guide：`https://epson.com/projector-guide-how-to-buy-a-projector-color-brightness`
 - XGIMI lumens/ANSI lumens guide：`https://us.xgimi.com/blogs/projectors-101/lumens-ansi-lumens-in-projector`
 - ProjectorCentral projector basics：`https://www.projectorcentral.com/projectors-101.cfm`
-- TI DLP Pico overview：`https://www.ti.com/dlp-chip/display-and-projection/array-pico/overview.html`
 
 证据摘要：
 - Epson 指出有窗会议室/教室建议至少约 2500 lumens，且亮度越高通常成本越高。
 - XGIMI 将低/中/高环境光对应到约 300-600、600-1600、1600-2500 ANSI lumens 区间。
 - ProjectorCentral 提醒未标注 ANSI/ISO 的亮度宣称要谨慎看待。
-- TI DLP Pico 证明小型低功耗投影芯片可行，但小体积投影仍受亮度、热和光机空间约束。
 
 判断：
 - LeLamp 办公终端的投影 MVP 应先限定为桌面/近距离确认卡片，不替代会议室主投影。

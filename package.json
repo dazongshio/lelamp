@@ -5,24 +5,63 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
+    "start:api": "bash scripts/start_fixed_console.sh",
+    "start:collaboration": "bash scripts/start_collaboration_server.sh",
+    "services:start": "systemctl --user start lelamp-collaboration.service lelamp-web-console.service",
+    "services:restart": "systemctl --user restart lelamp-collaboration.service lelamp-web-console.service",
+    "services:status": "systemctl --user status --no-pager lelamp-collaboration.service lelamp-web-console.service",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b",
+    "check": "npm run typecheck && npm run test:api-contract && npm run test:documents",
     "preview": "vite preview --host 0.0.0.0",
     "smoke:web-api": "python3 scripts/smoke_web_api.py",
+    "test:documents:markdown": "node scripts/test_document_markdown.mjs",
+    "test:documents:frontend": "node scripts/test_document_frontend.mjs",
+    "test:documents:editor": "node scripts/test_document_editor.mjs",
+    "test:documents": "lelamp_runtime/.venv/bin/python scripts/test_document_suite.py",
+    "test:api-contract": "PYTHONPATH=lelamp_runtime lelamp_runtime/.venv/bin/python -m unittest lelamp.test.test_api_contract -v",
     "smoke:tingwu-local": "python3 scripts/smoke_tingwu_local_suite.py",
     "verify:tingwu-live": "python3 scripts/verify_tingwu_live_suite.py"
   },
   "dependencies": {
+    "@hocuspocus/provider": "^2.15.2",
+    "@hocuspocus/server": "^2.15.2",
+    "@tiptap/extension-collaboration": "^2.27.1",
+    "@tiptap/extension-collaboration-cursor": "^2.27.1",
+    "@tiptap/extension-image": "^2.27.1",
+    "@tiptap/extension-link": "^2.27.1",
+    "@tiptap/extension-placeholder": "^2.27.1",
+    "@tiptap/extension-table": "^2.27.1",
+    "@tiptap/extension-table-cell": "^2.27.1",
+    "@tiptap/extension-table-header": "^2.27.1",
+    "@tiptap/extension-table-row": "^2.27.1",
+    "@tiptap/extension-task-item": "^2.27.1",
+    "@tiptap/extension-task-list": "^2.27.1",
+    "@tiptap/react": "^2.27.1",
+    "@tiptap/starter-kit": "^2.27.1",
+    "@types/turndown": "^5.0.5",
+    "docx": "^9.5.1",
     "lucide-react": "^0.468.0",
+    "marked": "^15.0.12",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.26.2"
+    "react-markdown": "^10.1.0",
+    "react-router-dom": "7.18.1",
+    "remark-gfm": "^4.0.1",
+    "turndown": "^7.2.0",
+    "turndown-plugin-gfm": "^1.0.2",
+    "y-prosemirror": "^1.3.7",
+    "yjs": "^13.6.27"
   },
   "devDependencies": {
     "@types/react": "^19.2.15",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.3.1",
+    "jsdom": "^25.0.1",
     "typescript": "^5.5.4",
-    "vite": "^5.4.2"
+    "vite": "^7.3.5"
+  },
+  "overrides": {
+    "esbuild": "0.28.1"
   }
 }

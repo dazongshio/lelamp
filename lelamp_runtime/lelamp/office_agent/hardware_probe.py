@@ -52,6 +52,8 @@ def probe_hardware(config: OfficeAgentConfig, *, projection_preview_port: int) -
     mic_available = mic_device is not None
     speaker_available = speaker_device is not None
     display_connected = any(item.get("status") == "connected" for item in drm_connectors) or " connected" in str(xrandr.get("stdout", ""))
+    projector_connected = detect_projector_connected(drm_connectors, str(xrandr.get("stdout", "")), str(kmsprint.get("stdout", "")), str(lsusb.get("stdout", "")))
+    projector_output = detect_projector_output(drm_connectors, str(xrandr.get("stdout", "")))
     serial_target_exists = Path(target_port).exists()
 
     devices = {
@@ -91,13 +93,15 @@ def probe_hardware(config: OfficeAgentConfig, *, projection_preview_port: int) -
             },
         },
         "projection": {
-            "status": "available" if display_connected else ("unavailable" if drm_connectors else "adapter_ready"),
+            "status": "available" if projector_connected or display_connected else ("unavailable" if drm_connectors else "adapter_ready"),
             "details": {
                 "drm_connectors": drm_connectors,
                 "xrandr_status": xrandr["status"],
                 "kmsprint_status": kmsprint["status"],
                 "preview_url": f"http://127.0.0.1:{projection_preview_port}/",
-                "physical_projector": "connected" if display_connected else "not_detected",
+                "physical_projector": "connected" if projector_connected else ("display_connected" if display_connected else "not_detected"),
+                "projector_connected": projector_connected,
+                "projector_output": projector_output,
             },
         },
         "rgb": {
@@ -196,6 +200,28 @@ def read_drm_connectors() -> list[dict[str, str]]:
             continue
         connectors.append({"connector": status_path.parent.name, "status": value})
     return connectors
+
+
+def detect_projector_output(drm_connectors: list[dict[str, str]], xrandr_stdout: str) -> str:
+    connected = [item.get("connector", "") for item in drm_connectors if item.get("status") == "connected"]
+    if connected:
+        return connected[0]
+    for line in xrandr_stdout.splitlines():
+        if " connected" in line:
+            return line.split()[0]
+    return ""
+
+
+def detect_projector_connected(drm_connectors: list[dict[str, str]], xrandr_stdout: str, kmsprint_stdout: str, lsusb_stdout: str) -> bool:
+    drm_connected = any(item.get("status") == "connected" for item in drm_connectors)
+    if drm_connected:
+        return True
+    xrandr_lower = xrandr_stdout.lower()
+    kms_lower = kmsprint_stdout.lower()
+    lsusb_lower = lsusb_stdout.lower()
+    xrandr_connected = any(" connected" in line for line in xrandr_lower.splitlines())
+    kms_connected = any("connected" in line and "disconnected" not in line for line in kms_lower.splitlines())
+    return xrandr_connected or kms_connected or "displaylink" in lsusb_lower
 
 
 def command_lists_audio_device(result: dict[str, object]) -> bool:

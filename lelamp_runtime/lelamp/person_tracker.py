@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import select
+import shutil
+import subprocess
 import sys
 import time
 from dataclasses import dataclass
@@ -394,17 +397,106 @@ class LampTargetController:
         return {f"{motor}.pos": value for motor, value in goal_pos.items()}
 
 
+class RpicamVideoCapture:
+    """Small OpenCV-compatible capture adapter for Raspberry Pi CSI cameras."""
+
+    def __init__(self, camera_index: int, *, width: int, height: int):
+        self.buffer = bytearray()
+        self.process = subprocess.Popen(
+            [
+                "rpicam-vid",
+                "--camera", str(camera_index),
+                "--width", str(width),
+                "--height", str(height),
+                "--framerate", "15",
+                "--codec", "mjpeg",
+                "--quality", "85",
+                "--timeout", "0",
+                "--nopreview",
+                "--output", "-",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+
+    def isOpened(self) -> bool:
+        return self.process.poll() is None and self.process.stdout is not None
+
+    def read(self) -> tuple[bool, Any | None]:
+        import cv2
+        import numpy as np
+
+        if self.process.stdout is None:
+            return False, None
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline and self.process.poll() is None:
+            start = self.buffer.find(b"\xff\xd8")
+            end = self.buffer.find(b"\xff\xd9", max(0, start + 2))
+            if start >= 0 and end >= 0:
+                jpeg = bytes(self.buffer[start : end + 2])
+                del self.buffer[: end + 2]
+                frame = cv2.imdecode(np.frombuffer(jpeg, dtype=np.uint8), cv2.IMREAD_COLOR)
+                if frame is not None:
+                    return True, frame
+            ready, _, _ = select.select([self.process.stdout], [], [], 0.5)
+            if not ready:
+                continue
+            chunk = self.process.stdout.read(65536)
+            if not chunk:
+                break
+            self.buffer.extend(chunk)
+            if len(self.buffer) > 8 * 1024 * 1024:
+                del self.buffer[:-2 * 1024 * 1024]
+        return False, None
+
+    def release(self) -> None:
+        if self.process.poll() is None:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait(timeout=2)
+        if self.process.stdout is not None:
+            self.process.stdout.close()
+
+
 def open_camera(camera_index: int, *, width: int | None, height: int | None) -> Any:
     import cv2
+
+    # On Raspberry Pi, camera indices 0 and 1 refer to libcamera CSI sensors.
+    # Prefer rpicam directly so OpenCV does not briefly claim a raw V4L2 node.
+    if camera_index in (0, 1) and shutil.which("rpicam-vid"):
+        csi_camera = RpicamVideoCapture(
+            camera_index,
+            width=width or 640,
+            height=height or 480,
+        )
+        if csi_camera.isOpened():
+            return csi_camera
+        csi_camera.release()
 
     camera = cv2.VideoCapture(camera_index)
     if width:
         camera.set(cv2.CAP_PROP_FRAME_WIDTH, width)
     if height:
         camera.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-    if not camera.isOpened():
-        raise RuntimeError(f"Unable to open camera index {camera_index}")
-    return camera
+    if camera.isOpened():
+        return camera
+    camera.release()
+
+    # Raspberry Pi CSI cameras are exposed through libcamera. Their raw V4L2
+    # nodes are visible to OpenCV but cannot be read as ordinary USB cameras.
+    if camera_index in (0, 1):
+        csi_camera = RpicamVideoCapture(
+            camera_index,
+            width=width or 640,
+            height=height or 480,
+        )
+        if csi_camera.isOpened():
+            return csi_camera
+        csi_camera.release()
+    raise RuntimeError(f"Unable to open camera index {camera_index}")
 
 
 def connect_motor_bus(args: argparse.Namespace, *, max_step: float | None = None) -> Any:

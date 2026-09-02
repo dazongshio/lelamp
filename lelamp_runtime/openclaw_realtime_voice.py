@@ -25,6 +25,7 @@ from lelamp.office_agent.dashscope_realtime import (
 )
 from lelamp.office_agent.hardware import LampHardware
 from lelamp.office_agent.hardware_probe import resolve_capture_device
+from lelamp.office_agent.remote_control import execute_saved_remote_voice_command
 from lelamp.office_agent.lelamp_voice_skill import parse_lamp_voice_command
 from lelamp.office_agent.meeting_voice_skill import execute_runtime_meeting_voice_command
 from lelamp.office_agent.runtime import build_runtime
@@ -804,6 +805,19 @@ def main() -> None:
                                 print(f"\n[local-command] response.cancel skipped: {exc}")
                         reply = str(lamp_result.get("reply") or "已执行台灯命令。")
                         print(f"\n[lamp/local] turn={turn_id} {lamp_result.get('status')}: {reply}")
+                remote_result = execute_saved_remote_voice_command(runtime, str(transcript))
+                if remote_result.get("handled"):
+                    turn_id = latency_tracker.active_turn_id
+                    local_commands.mark(turn_id)
+                    if player is not None:
+                        player.interrupt()
+                    try:
+                        client.cancel_response()
+                    except Exception as exc:
+                        if args.verbose:
+                            print(f"\n[local-command] response.cancel skipped: {exc}")
+                    reply = str(remote_result.get("reply") or "已执行远程电脑命令。")
+                    print(f"\n[remote/local] turn={turn_id} {remote_result.get('status')}: {reply}")
         elif event_type == "response.created":
             latency_tracker.mark("response_created_at")
         elif event_type == "response.audio_transcript.delta":

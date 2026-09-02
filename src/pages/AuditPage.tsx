@@ -174,7 +174,7 @@ export function AuditPage() {
                   <summary>事件诊断</summary>
                   <div className="advanced-panel__content">
                     <div className="definition-grid">
-                      <span>Request ID</span><strong>{selected.request_id || "-"}</strong>
+                      <span>请求编号</span><strong>{selected.request_id || "-"}</strong>
                       <span>来源 IP</span><strong>{selected.source_ip || "-"}</strong>
                       <span>原始对象</span><strong className="mono">{selected.target}</strong>
                     </div>
@@ -222,7 +222,7 @@ export function AuditPage() {
           </Card>
           <Card title="安全建议">
             <p>建议保持当前策略配置，如需访问外部路径，请通过受控的共享空间上传文件。</p>
-            <SkillChip>blocked behavior is audited</SkillChip>
+            <SkillChip>被阻止的操作也会记录审计</SkillChip>
           </Card>
         </div>
       </div>

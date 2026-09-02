@@ -1,13 +1,15 @@
-import { request, requestWithMock } from "./client";
+import { request, requestBlob, requestWithMock } from "./client";
 import type {
   ApiResult,
   MeetingJob,
+  MeetingInsightsResponse,
   MeetingJobsResponse,
   MeetingTextImportResponse,
   MeetingLocalRealtimeResponse,
   MeetingModeStatus,
   MeetingProviderPreflight,
   MeetingProviderStatus,
+  MeetingQaResponse,
   MeetingRealtimeEventsResponse,
   MeetingRealtimeStatus,
 } from "./types";
@@ -209,6 +211,13 @@ export async function startMeetingRealtime(payload: {
   return { data, source: "api" };
 }
 
+export async function importMeetingMedia(file: File): Promise<ApiResult<MeetingRealtimeStatus>> {
+  const form = new FormData();
+  form.append("file", file);
+  const data = await request<MeetingRealtimeStatus>("/api/meeting/import-media", { method: "POST", body: form });
+  return { data, source: "api" };
+}
+
 export async function stopMeetingRealtime(meetingId?: string, runFollowup = true): Promise<ApiResult<MeetingRealtimeStatus>> {
   const data = await request<MeetingRealtimeStatus>("/api/meeting/realtime/stop", {
     method: "POST",
@@ -232,6 +241,57 @@ export function getMeetingRealtimeEvents(meetingId: string): Promise<ApiResult<M
     events: [],
     total: 0,
   });
+}
+
+export async function askMeeting(meetingId: string, question: string): Promise<ApiResult<MeetingQaResponse>> {
+  const data = await request<MeetingQaResponse>("/api/meeting/realtime/ask", {
+    method: "POST",
+    body: JSON.stringify({ meeting_id: meetingId, question }),
+  });
+  return { data, source: "api" };
+}
+
+export function getMeetingAudio(meetingId: string): Promise<Blob> {
+  return requestBlob(`/api/meeting/realtime/audio?meeting_id=${encodeURIComponent(meetingId)}`);
+}
+
+export function exportMeetingTranscript(meetingId: string, format: "txt" | "srt" | "vtt"): Promise<Blob> {
+  return requestBlob(`/api/meeting/realtime/export?meeting_id=${encodeURIComponent(meetingId)}&format=${format}`);
+}
+
+export async function updateMeetingTranscript(payload: {
+  meeting_id: string;
+  index?: number;
+  text?: string;
+  speaker?: string;
+  rename_speaker_from?: string;
+}): Promise<ApiResult<MeetingRealtimeStatus>> {
+  const data = await request<MeetingRealtimeStatus>("/api/meeting/realtime/transcript", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return { data, source: "api" };
+}
+
+export async function getMeetingInsights(meetingId: string): Promise<ApiResult<MeetingInsightsResponse>> {
+  const data = await request<MeetingInsightsResponse>(`/api/meeting/realtime/insights?meeting_id=${encodeURIComponent(meetingId)}`);
+  return { data, source: "api" };
+}
+
+export async function toggleMeetingHighlight(meetingId: string, index: number): Promise<ApiResult<{ highlights: MeetingInsightsResponse["highlights"] }>> {
+  const data = await request<{ highlights: MeetingInsightsResponse["highlights"] }>("/api/meeting/realtime/highlight", {
+    method: "POST",
+    body: JSON.stringify({ meeting_id: meetingId, index }),
+  });
+  return { data, source: "api" };
+}
+
+export async function shareMeetingClip(meetingId: string, index: number): Promise<ApiResult<{ url: string; expires_at: string }>> {
+  const data = await request<{ url: string; expires_at: string }>("/api/meeting/realtime/share-clip", {
+    method: "POST",
+    body: JSON.stringify({ meeting_id: meetingId, index, expires_hours: 168 }),
+  });
+  return { data, source: "api" };
 }
 
 export async function importMeetingText(

@@ -21,6 +21,7 @@ from lelamp.office_agent.config import PermissionMode
 from lelamp.office_agent.desktop_companion import build_desktop_companion
 from lelamp.office_agent.hardware import LampHardware
 from lelamp.office_agent.lelamp_voice_skill import parse_lamp_voice_command
+from lelamp.office_agent.remote_control import execute_saved_remote_voice_command
 from lelamp.office_agent.meeting_voice_skill import execute_runtime_meeting_voice_command, parse_meeting_voice_command
 from lelamp.office_agent.prompts import OFFICE_AGENT_INSTRUCTIONS
 from lelamp.office_agent.projection_viewer import ProjectionPreviewServer, find_free_port
@@ -519,6 +520,9 @@ def run_manual_agent(runtime, text: str) -> dict[str, object]:
     elif route.intent == "lelamp_voice_control":
         tool = "control_lamp_by_voice"
         result = run_lamp_voice_command(runtime, text)
+    elif route.intent == "remote_control":
+        tool = "control_remote_by_voice"
+        result = execute_saved_remote_voice_command(runtime, text)
     elif route.intent == "lelamp_capabilities":
         tool = "list_lelamp_capabilities"
         result = runtime.lelamp_experience.capability_map()
@@ -959,12 +963,12 @@ def run_tool(runtime, tool: str, args: argparse.Namespace) -> object:
         )
         lan_ip = find_lan_ip()
         if lan_ip and host == "0.0.0.0":
-            print(f"Detected LAN URL: http://{lan_ip}:{port}/?token={server.token}")
+            print(f"Detected LAN URL: http://{lan_ip}:{port}/")
         server.serve(host=host, port=port)
         return {"status": "stopped", "host": host, "port": port}
     if tool == "web-console":
         host = args.host
-        port = find_free_port(host, args.port)
+        port = args.port
         server = WebConsoleServer(
             runtime,
             token=args.token or None,
@@ -1175,7 +1179,7 @@ def main() -> None:
     share_note.add_argument("text")
 
     web_console = subparsers.add_parser("web-console", help="Serve the LeLamp/OpenClaw Raspberry Pi web control console")
-    web_console.add_argument("--host", default="127.0.0.1")
+    web_console.add_argument("--host", default="0.0.0.0")
     web_console.add_argument("--port", type=int, default=8790)
     web_console.add_argument("--token", default="", help="Optional fixed console token; generated if omitted")
     web_console.add_argument("--max-mb", type=int, default=50, help="Maximum upload size per request")

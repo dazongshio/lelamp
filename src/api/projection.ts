@@ -15,10 +15,14 @@ export function getProjectionServiceStatus(): Promise<ApiResult<ProjectionServic
     status: "adapter_ready",
     preview_url: "http://127.0.0.1:8765/",
     display_test_mode: true,
-    physical_projector: "display_substitute",
+    physical_projector: "connected",
+    projector_output: "",
     output_target: "external_monitor",
     started_at: null,
-    message: "External monitor display mode is available.",
+    kiosk_running: false,
+    kiosk_started_at: null,
+    kiosk_pid: null,
+    message: "Projection preview mode is available.",
   });
 }
 

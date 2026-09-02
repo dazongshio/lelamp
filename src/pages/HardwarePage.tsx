@@ -105,14 +105,15 @@ export function HardwarePage() {
       camera: "摄像头",
       mic: "麦克风",
       speaker: "扬声器",
-      projection: "投影/显示",
+      projection: "投影仪",
       rgb: "状态光效",
+      usb: "USB 设备",
     };
     const mapped = Object.entries(raw).map(([key, value]) => ({
       key,
       label: labels[key] ?? key,
       status: value.status,
-      note: friendlyDeviceNote(key, value.status),
+      note: friendlyDeviceNote(key, value.status, value.details),
     }));
     return [
       { key: "hardware_enabled", label: "硬件总开关", status: status?.hardware_enabled ? "enabled" : "adapter_ready", note: status?.hardware_enabled ? "硬件模块已启用" : "等待接入硬件桥" },
@@ -139,7 +140,7 @@ export function HardwarePage() {
             <button onClick={() => void runTest("camera")} disabled={testing === "camera"}><Camera size={18} /><strong>测试摄像头</strong><span>拍摄一张受控测试照片</span></button>
             <button onClick={() => void runTest("mic")} disabled={testing === "mic"}><Mic size={18} /><strong>测试麦克风</strong><span>录制短音频并检测输入音量</span></button>
             <button onClick={() => void runTest("speaker")} disabled={testing === "speaker"}><Speaker size={18} /><strong>测试扬声器</strong><span>从树莓派/服务端音频输出播放 0.6 秒测试音</span></button>
-            <button onClick={() => void runTest("projection")} disabled={testing === "projection"}><MonitorPlay size={18} /><strong>测试投影卡</strong><span>生成投影测试画面</span></button>
+            <button onClick={() => void runTest("projection")} disabled={testing === "projection"}><MonitorPlay size={18} /><strong>测试投影仪</strong><span>生成投影测试画面并写入投影输出</span></button>
             <button onClick={() => void runTest("rgb")} disabled={testing === "rgb"}><Zap size={18} /><strong>测试状态灯</strong><span>按当前状态触发灯效</span></button>
           </div>
           <p className="small muted">当前测试中：{testing || "无"} · 扫描时间：{status?.scanned_at ?? "未扫描"}</p>
@@ -167,6 +168,17 @@ export function HardwarePage() {
             {!speakerCandidates(status).length && <span className="small muted">未扫描到 ALSA 播放候选设备。</span>}
           </div>
         </Card>
+        <Card title="投影仪接入" subtitle="显示真实投影仪或外接显示输出状态；测试只生成投影画面，不直接修改投影仪固件。">
+          <div className="definition-grid">
+            <span>物理状态</span><StatusBadge status={projectionConnected(status) ? "available" : "adapter_ready"} label={projectionConnected(status) ? "已接入" : "替代模式"} />
+            <span>输出口</span><strong>{projectionOutput(status) || "未检测到固定输出口"}</strong>
+            <span>预览链接</span><strong>{projectionPreviewUrl(status) || "等待启动投影预览服务"}</strong>
+            <span>系统状态</span><StatusBadge status={status?.devices?.projection?.status ?? "pending"} />
+          </div>
+          <div className="row">
+            <button className="primary-button" onClick={() => void runTest("projection")} disabled={testing === "projection"}><MonitorPlay size={16} /> 生成投影测试画面</button>
+          </div>
+        </Card>
         <div className="grid-6 hardware-grid">
           {devices.map((device, index) => <HardwareStatusCard key={device.key} device={device} index={index} />)}
         </div>
@@ -188,8 +200,8 @@ export function HardwarePage() {
         <div className="grid-3">
           <Card title="传感器 / 设备健康">
             <div className="list-rows">
-              <SensorRow label="CPU 温度" value={formatSensor(status?.sensors?.cpu_temp, "°C")} />
-              <SensorRow label="CPU 使用率" value={formatPercent(status?.sensors?.cpu_usage)} />
+              <SensorRow label="处理器温度" value={formatSensor(status?.sensors?.cpu_temp, "°C")} />
+              <SensorRow label="处理器使用率" value={formatPercent(status?.sensors?.cpu_usage)} />
               <SensorRow label="内存使用率" value={formatPercent(status?.sensors?.memory_usage)} />
               <SensorRow label="工作区磁盘使用率" value={formatPercent(status?.sensors?.disk_usage)} />
               <SensorRow label="供电状态" value={friendlyPowerState(status?.sensors?.power_state)} status={String(status?.sensors?.power_state ?? "backend_missing")} />
@@ -288,16 +300,39 @@ function speakerSelectedLabel(status: HardwareStatus | null) {
   return speakerCandidates(status).find((candidate) => candidate.device === selected)?.label ?? (selected === "-" ? "未选择" : "已选择输出设备");
 }
 
-function friendlyDeviceNote(key: string, status: unknown) {
+function friendlyDeviceNote(key: string, status: unknown, details?: Record<string, unknown>) {
   if (String(status) === "adapter_ready" || String(status) === "backend_missing") return "等待接入或配置";
+  if (key === "projection") {
+    const connected = Boolean(details?.projector_connected);
+    const output = String(details?.projector_output ?? "");
+    if (connected) return output ? `真实投影仪已接入：${output}` : "真实投影仪已接入";
+    return "未检测到真实投影仪，当前使用外接显示/预览替代模式";
+  }
   const labels: Record<string, string> = {
     camera: "可用于拍照扫描和场景观察",
     mic: "可用于会议转写和语音交互",
     speaker: "可用于语音播报和测试音",
-    projection: "可用于投影预览和演示输出",
     rgb: "可用于显示助手状态",
+    usb: "可用于识别外设接入情况",
   };
   return labels[key] ?? "设备状态已记录";
+}
+
+function projectionDetails(status: HardwareStatus | null) {
+  const details = status?.devices?.projection?.details;
+  return details && typeof details === "object" ? details as Record<string, unknown> : {};
+}
+
+function projectionConnected(status: HardwareStatus | null) {
+  return Boolean(projectionDetails(status).projector_connected);
+}
+
+function projectionOutput(status: HardwareStatus | null) {
+  return String(projectionDetails(status).projector_output ?? "");
+}
+
+function projectionPreviewUrl(status: HardwareStatus | null) {
+  return String(projectionDetails(status).preview_url ?? "");
 }
 
 function friendlyHardwareAction(action: string) {

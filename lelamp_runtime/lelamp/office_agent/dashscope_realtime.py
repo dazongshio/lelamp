@@ -18,6 +18,177 @@ class DashScopeRealtimeError(RuntimeError):
     pass
 
 
+QWEN_OMNI_35_VOICES: tuple[dict[str, str], ...] = (
+    {"voice": "Tina", "label": "Tina", "description": "Warm, sweet, cozy, and crisp for problem solving."},
+    {"voice": "Cindy", "label": "Cindy", "description": "Sweet-talking young woman from Taiwan."},
+    {"voice": "Liora Mira", "label": "Liora Mira", "description": "Gentle and warm everyday voice."},
+    {"voice": "Sunnybobi", "label": "Sunnybobi", "description": "Cheerful neighbor-girl style."},
+    {"voice": "Raymond", "label": "Raymond", "description": "Clear-voiced homebody."},
+    {"voice": "Ethan", "label": "Ethan", "description": "Bright, warm Mandarin male voice."},
+    {"voice": "Theo Calm", "label": "Theo Calm", "description": "Quiet, understanding, healing tone."},
+    {"voice": "Serena", "label": "Serena", "description": "Gentle young woman."},
+    {"voice": "Harvey", "label": "Harvey", "description": "Deep, mellow, mature voice."},
+    {"voice": "Maia", "label": "Maia", "description": "Intellectual and gentle."},
+    {"voice": "Evan", "label": "Evan", "description": "Youthful college-student style."},
+    {"voice": "Qiao", "label": "Qiao", "description": "Cute with personality."},
+    {"voice": "Momo", "label": "Momo", "description": "Playful and mischievous."},
+    {"voice": "Wil", "label": "Wil", "description": "Young Shenzhen male with Hong Kong/Taiwan accent."},
+    {"voice": "Angel", "label": "Angel", "description": "Sweet, slightly Taiwanese-accented."},
+    {"voice": "Li Cassian", "label": "Li Cassian", "description": "Restrained, thoughtful voice."},
+    {"voice": "Mia", "label": "Mia", "description": "Slow-living lifestyle artist."},
+    {"voice": "Joyner", "label": "Joyner", "description": "Funny, exaggerated, down-to-earth."},
+    {"voice": "Gold", "label": "Gold", "description": "West Coast Black rapper style."},
+    {"voice": "Katerina", "label": "Katerina", "description": "Mature, commanding, rhythmic."},
+    {"voice": "Ryan", "label": "Ryan", "description": "High-energy dramatic delivery."},
+    {"voice": "Jennifer", "label": "Jennifer", "description": "Cinematic American female voice."},
+    {"voice": "Aiden", "label": "Aiden", "description": "American young man."},
+    {"voice": "Mione", "label": "Mione", "description": "Mature British female voice."},
+    {"voice": "Sunny", "label": "Sichuan - Sunny", "description": "Sweet Sichuan female voice."},
+    {"voice": "Dylan", "label": "Beijing - Dylan", "description": "Young Beijing hutong voice."},
+    {"voice": "Eric", "label": "Sichuan - Eric", "description": "Lively Chengdu male voice."},
+    {"voice": "Peter", "label": "Tianjin - Peter", "description": "Tianjin crosstalk foil style."},
+    {"voice": "Joseph Chen", "label": "Joseph Chen", "description": "Warm overseas Chinese male voice."},
+    {"voice": "Marcus", "label": "Shaanxi - Marcus", "description": "Deep, sincere Shaanxi male voice."},
+    {"voice": "Li", "label": "Nanjing - Li", "description": "Nanjing male voice."},
+    {"voice": "Rocky", "label": "Cantonese - Rocky", "description": "Witty Cantonese chat companion."},
+    {"voice": "Sohee", "label": "Sohee", "description": "Warm, expressive Korean female voice."},
+    {"voice": "Lenn", "label": "Lenn", "description": "Rational, rebellious German youth."},
+    {"voice": "Ono Anna", "label": "Ono Anna", "description": "Clever, playful Japanese voice."},
+    {"voice": "Sonrisa", "label": "Sonrisa", "description": "Warm Latin American female voice."},
+    {"voice": "Bodega", "label": "Bodega", "description": "Warm, enthusiastic Spanish male voice."},
+    {"voice": "Emilien", "label": "Emilien", "description": "Romantic French big brother."},
+    {"voice": "Andre", "label": "Andre", "description": "Magnetic, steady male voice."},
+    {"voice": "Radio Gol", "label": "Radio Gol", "description": "Passionate football commentator."},
+    {"voice": "Alek", "label": "Alek", "description": "Cold Russian spirit with warmth underneath."},
+    {"voice": "Rizky", "label": "Rizky", "description": "Young Indonesian male voice."},
+    {"voice": "Roya", "label": "Roya", "description": "Sporty, free-spirited female voice."},
+    {"voice": "Arda", "label": "Arda", "description": "Clean, crisp, gently warm Turkish voice."},
+    {"voice": "Hana", "label": "Hana", "description": "Mature Vietnamese female voice."},
+    {"voice": "Dolce", "label": "Dolce", "description": "Laid-back Italian male voice."},
+    {"voice": "Jakub", "label": "Jakub", "description": "Charismatic Polish young man."},
+    {"voice": "Griet", "label": "Griet", "description": "Mature artistic Dutch female voice."},
+    {"voice": "Eliška", "label": "Eliška", "description": "Warm Central European female voice."},
+    {"voice": "Marina", "label": "Marina", "description": "Multicultural-city female voice."},
+    {"voice": "Siiri", "label": "Siiri", "description": "Reserved, gentle Finnish voice."},
+    {"voice": "Ingrid", "label": "Ingrid", "description": "Rural Norwegian female voice."},
+    {"voice": "Sigga", "label": "Sigga", "description": "Intellectual Icelandic female voice."},
+    {"voice": "Bea", "label": "Bea", "description": "Sweet Filipino female voice."},
+    {"voice": "Chloe", "label": "Chloe", "description": "Malaysian office worker voice."},
+)
+
+
+QWEN_OMNI_FLASH_202512_VOICES: tuple[dict[str, str], ...] = (
+    {"voice": "Cherry", "label": "Cherry", "description": "Sunny, positive, friendly, natural young woman."},
+    {"voice": "Serena", "label": "Serena", "description": "Gentle young woman."},
+    {"voice": "Ethan", "label": "Ethan", "description": "Warm, energetic Mandarin male voice."},
+    {"voice": "Chelsie", "label": "Chelsie", "description": "Virtual girlfriend style."},
+    {"voice": "Momo", "label": "Momo", "description": "Playful and mischievous."},
+    {"voice": "Vivian", "label": "Vivian", "description": "Confident, cute, slightly feisty."},
+    {"voice": "Moon", "label": "Moon", "description": "Cool and effortless."},
+    {"voice": "Maia", "label": "Maia", "description": "Intellectual and gentle."},
+    {"voice": "Kai", "label": "Kai", "description": "Soothing voice."},
+    {"voice": "Nofish", "label": "Nofish", "description": "Designer voice, weak retroflex pronunciation."},
+    {"voice": "Bella", "label": "Bella", "description": "Little girl voice."},
+    {"voice": "Jennifer", "label": "Jennifer", "description": "Cinematic American English female voice."},
+    {"voice": "Ryan", "label": "Ryan", "description": "Rhythmic, dramatic male voice."},
+    {"voice": "Katerina", "label": "Katerina", "description": "Mature, rhythmic female voice."},
+    {"voice": "Aiden", "label": "Aiden", "description": "American English young man."},
+    {"voice": "Eldric Sage", "label": "Eldric Sage", "description": "Calm, wise elder."},
+    {"voice": "Mia", "label": "Mia", "description": "Gentle female voice."},
+    {"voice": "Mochi", "label": "Mochi", "description": "Quick-witted young adult."},
+    {"voice": "Bellona", "label": "Bellona", "description": "Powerful character voice."},
+    {"voice": "Vincent", "label": "Vincent", "description": "Raspy, smoky heroic voice."},
+    {"voice": "Bunny", "label": "Bunny", "description": "Very cute little-girl voice."},
+    {"voice": "Neil", "label": "Neil", "description": "Professional news-anchor style."},
+    {"voice": "Elias", "label": "Elias", "description": "Academic storytelling voice."},
+    {"voice": "Arthur", "label": "Arthur", "description": "Earthy village storyteller."},
+    {"voice": "Nini", "label": "Nini", "description": "Soft, clingy young female voice."},
+    {"voice": "Ebona", "label": "Ebona", "description": "Whispery suspense voice."},
+    {"voice": "Seren", "label": "Seren", "description": "Gentle sleep-aid voice."},
+    {"voice": "Pip", "label": "Pip", "description": "Playful mischievous boy."},
+    {"voice": "Stella", "label": "Stella", "description": "Sweet dramatic teenage-girl voice."},
+    {"voice": "Bodega", "label": "Bodega", "description": "Passionate Spanish male voice."},
+    {"voice": "Sonrisa", "label": "Sonrisa", "description": "Outgoing Latin American female voice."},
+    {"voice": "Alek", "label": "Alek", "description": "Russian male voice."},
+    {"voice": "Dolce", "label": "Dolce", "description": "Laid-back Italian male voice."},
+    {"voice": "Sohee", "label": "Sohee", "description": "Warm Korean female voice."},
+    {"voice": "Ono Anna", "label": "Ono Anna", "description": "Spirited Japanese childhood friend."},
+    {"voice": "Lenn", "label": "Lenn", "description": "Rebellious German youth."},
+    {"voice": "Emilien", "label": "Emilien", "description": "Romantic French male voice."},
+    {"voice": "Andre", "label": "Andre", "description": "Magnetic, steady male voice."},
+    {"voice": "Radio Gol", "label": "Radio Gol", "description": "Football commentator."},
+    {"voice": "Jada", "label": "Shanghai - Jada", "description": "Fast-paced Shanghai auntie."},
+    {"voice": "Dylan", "label": "Beijing - Dylan", "description": "Young Beijing hutong voice."},
+    {"voice": "Li", "label": "Nanjing - Li", "description": "Patient yoga teacher."},
+    {"voice": "Marcus", "label": "Shaanxi - Marcus", "description": "Deep Shaanxi male voice."},
+    {"voice": "Roy", "label": "Southern Min - Roy", "description": "Humorous Taiwanese male voice."},
+    {"voice": "Peter", "label": "Tianjin - Peter", "description": "Tianjin crosstalk foil style."},
+    {"voice": "Sunny", "label": "Sichuan - Sunny", "description": "Sweet Sichuan female voice."},
+    {"voice": "Eric", "label": "Sichuan - Eric", "description": "Chengdu male voice."},
+    {"voice": "Rocky", "label": "Cantonese - Rocky", "description": "Witty Cantonese chat companion."},
+    {"voice": "Kiki", "label": "Cantonese - Kiki", "description": "Sweet Hong Kong female voice."},
+)
+
+
+QWEN_OMNI_FLASH_202509_VOICES: tuple[dict[str, str], ...] = tuple(
+    voice
+    for voice in QWEN_OMNI_FLASH_202512_VOICES
+    if voice["voice"]
+    in {
+        "Cherry",
+        "Ethan",
+        "Nofish",
+        "Jennifer",
+        "Ryan",
+        "Katerina",
+        "Elias",
+        "Jada",
+        "Dylan",
+        "Sunny",
+        "Li",
+        "Marcus",
+        "Roy",
+        "Peter",
+        "Rocky",
+        "Kiki",
+        "Eric",
+    }
+)
+
+
+QWEN_OMNI_TURBO_VOICES: tuple[dict[str, str], ...] = tuple(
+    voice
+    for voice in QWEN_OMNI_FLASH_202512_VOICES
+    if voice["voice"] in {"Cherry", "Serena", "Ethan", "Chelsie"}
+)
+
+
+def qwen_omni_realtime_default_voice(model: str) -> str:
+    normalized = model.lower()
+    if "3.5" in normalized:
+        return "Tina"
+    if "turbo" in normalized:
+        return "Chelsie"
+    return "Cherry"
+
+
+def qwen_omni_realtime_voices(model: str) -> list[dict[str, str]]:
+    normalized = model.lower()
+    if "3.5" in normalized:
+        voices = QWEN_OMNI_35_VOICES
+    elif "turbo" in normalized:
+        voices = QWEN_OMNI_TURBO_VOICES
+    elif "2025-12-01" in normalized:
+        voices = QWEN_OMNI_FLASH_202512_VOICES
+    else:
+        voices = QWEN_OMNI_FLASH_202509_VOICES
+    return [dict(item) for item in voices]
+
+
+def qwen_omni_voice_supported(model: str, voice: str) -> bool:
+    return any(item["voice"] == voice for item in qwen_omni_realtime_voices(model))
+
+
 @dataclass(frozen=True)
 class DashScopeRealtimeConfig:
     api_key: str

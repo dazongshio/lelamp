@@ -42,6 +42,17 @@ const labelMap: Record<string, string> = {
   needs_config: "需配置",
   empty: "暂无",
   ready: "就绪",
+  idle: "空闲",
+  offline: "离线",
+  active: "活动中",
+  inactive: "未启用",
+  connected: "已连接",
+  disconnected: "未连接",
+  reachable: "可连接",
+  configured: "已配置",
+  unconfigured: "未配置",
+  unknown: "未知",
+  binary: "二进制文件",
 };
 
 function toneFor(status: string): string {

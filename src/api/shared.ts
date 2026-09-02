@@ -52,6 +52,20 @@ export async function saveSharedNote(title: string, content: string): Promise<Ap
   return { data, source: "api" };
 }
 
+export async function saveWorkspaceMarkdown(
+  filePath: string,
+  content: string,
+): Promise<ApiResult<{ status: string; workspace_name: string; name: string; size_bytes: number; updated_at: string }>> {
+  const data = await request<{ status: string; workspace_name: string; name: string; size_bytes: number; updated_at: string }>(
+    "/api/workspace/markdown",
+    {
+      method: "POST",
+      body: JSON.stringify({ file_path: filePath, content }),
+    },
+  );
+  return { data, source: "api" };
+}
+
 export async function runSharedFileAction(
   filePath: string,
   action: SharedFileAction,

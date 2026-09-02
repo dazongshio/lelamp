@@ -22,6 +22,15 @@ import { PageHeader } from "../components/PageHeader";
 import { ProjectionPreview } from "../components/ProjectionPreview";
 import { StatusBadge } from "../components/StatusBadge";
 import { usePolling } from "../hooks/usePolling";
+import {
+  cacheBustedUrl,
+  compactDisplayPath,
+  formatProjectionTime,
+  friendlyCardMode,
+  friendlyDisplayMode,
+  friendlyStatus,
+  metricStatus,
+} from "./projectionPageUtils";
 import "./pages.css";
 
 const templateCards: ProjectionCard[] = [
@@ -293,55 +302,75 @@ export function ProjectionPage() {
   }
 
   const recentCards = latest?.cards ?? [];
+  const latestCard = recentCards[0] ?? null;
+  const activeCard = selected.id.startsWith("tpl-") ? latestCard : selected;
+  const activeHtml = activeCard?.html ?? latest?.html ?? "";
+  const activePath = activeCard?.path ?? latest?.path;
+  const activeName = latest?.name ?? (activePath ? compactDisplayPath(activePath) : "");
+  const activeTitle = activeCard?.title ?? activeName ?? "等待投影结果";
   const previewUrl = service?.preview_url ?? latest?.path ?? "";
+  const previewFrameUrl = service?.preview_url ? cacheBustedUrl(service.preview_url, latest?.mtime) : "";
+  const latestUpdatedAt = formatProjectionTime(latest?.mtime);
 
   return (
     <>
-      <PageHeader title="投影演示" description="投影 PPT、Markdown、会议卡片，并完成亮度与画面校准" actions={<button className="ghost-button" onClick={() => void load()}>刷新</button>} />
-      <div className="page-grid">
+      <PageHeader title="投影" description="选择要展示的内容，然后开始投影" actions={<button className="ghost-button" onClick={() => void load()}>刷新状态</button>} />
+      <div className="page-grid projection-user-page">
         {error && <div className="danger-panel">操作失败：{error}</div>}
-        <div className="projection-top">
-          <Card title="外接屏预览" action={<StatusBadge status={service?.status ?? "adapter_ready"} label={friendlyStatus(service?.status ?? "adapter_ready")} />}>
-            <p>在接外屏的设备中打开预览，并拖到外接显示器全屏。</p>
-            <div className="url-line">
-              <strong>{previewUrl || "等待预览服务"}</strong>
-              <button className="ghost-button" onClick={() => void navigator.clipboard?.writeText(previewUrl)} disabled={!previewUrl}>复制链接</button>
+        <section className={`projection-user-hero ${service?.kiosk_running ? "is-running" : ""}`}>
+          <div className="projection-user-hero__status">
+            <span className="projection-user-hero__icon"><MonitorPlay size={25} /></span>
+            <div>
+              <span className="projection-user-eyebrow">当前状态</span>
+              <h2>{service?.kiosk_running ? "正在投影" : service?.physical_projector === "connected" ? "投影设备已连接" : "等待连接投影设备"}</h2>
+              <p>{service?.kiosk_running ? `正在展示：${activeTitle}` : "准备好内容后，点击右侧按钮即可开始。"}</p>
             </div>
-            <p className="small muted">打开地址后把窗口拖到外接显示器，按 F 进入全屏；新卡片会自动刷新。</p>
-          </Card>
-          <Card title="服务状态">
-            <div className="definition-grid">
-              <span>服务状态</span><StatusBadge status={service?.status ?? "adapter_ready"} label={friendlyStatus(service?.status ?? "adapter_ready")} />
-              <span>输出模式</span><StatusBadge status={service?.display_test_mode ? "adapter_ready" : "unavailable"} label="外接显示器" />
-              <span>投影替代</span><StatusBadge status={service?.physical_projector ?? "display_substitute"} label="显示器代替" />
-              <span>说明</span><strong className="definition-grid__wide-value">{service?.message ?? "等待操作"}</strong>
-            </div>
-          </Card>
-          <Card title="服务控制">
-            <div className="stack">
-              <button className="primary-button" onClick={() => void serviceAction("start")}><MonitorPlay size={16} /> 启动预览服务</button>
-              <button className="danger-button" onClick={() => void serviceAction("stop")}><Square size={16} /> 停止预览服务</button>
-              <span className="small muted">预览服务只负责显示内容，不控制真实投影光机。</span>
-            </div>
-          </Card>
-        </div>
+          </div>
+          <div className="projection-user-hero__actions">
+            {service?.kiosk_running ? (
+              <button className="projection-stop-button" onClick={() => void serviceAction("stop")}><Square size={17} />结束投影</button>
+            ) : (
+              <button className="projection-start-button" onClick={() => void serviceAction("start")}><MonitorPlay size={18} />开始投影</button>
+            )}
+            {previewUrl.startsWith("http") && <a className="projection-preview-link" href={previewUrl} target="_blank" rel="noreferrer">单独打开预览 <ExternalLink size={14} /></a>}
+          </div>
+        </section>
 
-        <div className="projection-main">
-          <Card title="当前投影预览（最新卡片）">
-            {latest?.html ? <div className="projection-html" dangerouslySetInnerHTML={{ __html: latest.html }} /> : <ProjectionPreview card={selected} />}
-            <div className="row-between projection-meta">
-              <span>卡片类型：{selected.mode}</span>
-              <span>生成时间：{selected.created_at}</span>
-              <span>分辨率：{selected.resolution}</span>
-              <span>{notice}</span>
+        <section className="projection-user-steps" aria-label="投影操作步骤">
+          <div className="active"><b>1</b><span><strong>选择内容</strong><small>卡片、文档或演示文稿</small></span></div>
+          <div><b>2</b><span><strong>确认预览</strong><small>检查画面是否正确</small></span></div>
+          <div className={service?.kiosk_running ? "active" : ""}><b>3</b><span><strong>开始投影</strong><small>内容显示到投影设备</small></span></div>
+        </section>
+
+        <div className="projection-main projection-main--user">
+          <Card
+            title="投影画面"
+            subtitle={latestUpdatedAt ? `最后更新于 ${latestUpdatedAt}` : "开始前请先确认画面内容"}
+            action={<StatusBadge status={service?.kiosk_running ? "available" : "adapter_ready"} label={service?.kiosk_running ? "投影中" : "预览"} />}
+          >
+            <div className="projection-live-result">
+              <div className="projection-live-result__frame">
+                {previewFrameUrl ? (
+                  <iframe title="当前投影预览" src={previewFrameUrl} />
+                ) : activeHtml ? (
+                  <div className="projection-html" dangerouslySetInnerHTML={{ __html: activeHtml }} />
+                ) : (
+                  <ProjectionPreview card={selected} />
+                )}
+              </div>
+              <div className="projection-user-now">
+                <div><span>当前内容</span><strong>{activeTitle}</strong></div>
+                <div><span>设备</span><strong>{service?.physical_projector === "connected" ? "投影设备已连接" : "预览模式"}</strong></div>
+                <span>{notice}</span>
+              </div>
             </div>
           </Card>
-          <Card title="生成投影卡片" subtitle="快速生成并预览常见投影卡片">
+          <Card title="快速展示" subtitle="点击一种内容，立即更新投影画面">
             <div className="projection-template-list">
               {templateCards.map((card) => (
                 <button key={card.id} onClick={() => void choose(card)} className={selected.id === card.id ? "selected" : ""}>
                   <ProjectionPreview card={card} compact />
-                  <strong>{card.mode}</strong>
+                  <strong>{friendlyCardMode(card.mode)}</strong>
                   <span>{card.subtitle}</span>
                 </button>
               ))}
@@ -349,7 +378,9 @@ export function ProjectionPage() {
           </Card>
         </div>
 
-        <Card title="亮度与画面校正" subtitle="用于外接显示器预览；真实投影光机接入后可复用校准结果" action={<StatusBadge status={displayProfile?.status ?? "pending"} />}>
+        <details className="projection-settings-group">
+          <summary><span><strong>画面调整</strong><small>亮度、对比度、缩放和梯形校正</small></span><ChevronRight size={18} /></summary>
+        <Card title="画面调整" subtitle="仅在画面过暗、变形或超出幕布时使用" action={<StatusBadge status={displayProfile?.status ?? "pending"} />}>
           <div className="display-profile-grid">
             <label>
               <span>环境亮度 lux</span>
@@ -386,6 +417,7 @@ export function ProjectionPage() {
             <span>说明</span><strong className="definition-grid__wide-value">{displayProfile?.profile.note ?? displayProfile?.message ?? "-"}</strong>
           </div>
         </Card>
+        </details>
 
         <Card title="总结这一页 PPT" subtitle="选择 PPT 窗口或屏幕，截取当前页并生成可投影摘要" action={<StatusBadge status={pptSummary?.status ?? "pending"} />}>
           <div className="ppt-summary-tool">
@@ -416,7 +448,7 @@ export function ProjectionPage() {
               <Presentation size={22} />
               <input className="input" value={pptxPath} onChange={(event) => setPptxPath(event.target.value)} placeholder="demo.pptx" />
               <input className="input" value={pptxTitle} onChange={(event) => setPptxTitle(event.target.value)} placeholder="投影标题" />
-              <input className="input pptx-slide-input" type="number" min={1} value={pptxSlideIndex} onChange={(event) => setPptxSlideIndex(Number(event.target.value) || 1)} aria-label="PPT 页码" />
+              <input className="input pptx-slide-input" type="number" min={1} value={pptxSlideIndex} onChange={(event) => setPptxSlideIndex(Number(event.target.value) || 1)} aria-label="演示文稿页码" />
               <button className="primary-button" onClick={() => void projectPptx("show")} disabled={pptxBusy || !pptxPath.trim()}>
                 {pptxBusy ? "投影中..." : "投影此页"}
               </button>
@@ -539,7 +571,7 @@ export function ProjectionPage() {
         </Card>
 
         <div className="blue-note">
-          当前采用外接显示器代替投影：先验证会议卡片、确认页和演示内容闭环，真实光机亮度、对焦和梯形校正后续再接入。
+          当前使用已接入的物理投影输出；如果投影仪画面与本页不一致，请先刷新本页并确认投影窗口仍在 DPI 输出上。
           <a className="link-blue" href={previewUrl.startsWith("http") ? previewUrl : undefined} target="_blank" rel="noreferrer"> 在新窗口中打开 <ExternalLink size={14} /></a>
         </div>
         <details className="advanced-panel">
@@ -556,7 +588,7 @@ export function ProjectionPage() {
               <div className="definition-grid">
                 <span>PPT 摘要</span><strong>{compactDisplayPath(pptSummary?.projection_path)}</strong>
                 <span>PPT 文件</span><strong>{compactDisplayPath(pptxSession?.projection_path ?? pptxSession?.path)}</strong>
-                <span>Markdown</span><strong>{compactDisplayPath(markdownProjection?.projection_path ?? markdownProjection?.path)}</strong>
+                <span>标记文档</span><strong>{compactDisplayPath(markdownProjection?.projection_path ?? markdownProjection?.path)}</strong>
                 <span>校准分析</span><strong>{compactDisplayPath(calibration?.analysis_path)}</strong>
               </div>
             </Card>
@@ -614,51 +646,4 @@ async function fileToDataUrl(file: File): Promise<string> {
     };
     reader.readAsDataURL(file);
   });
-}
-
-function metricStatus(value: Record<string, unknown> | undefined): string {
-  if (!value) return "-";
-  const status = String(value.status ?? "-");
-  const numeric = value.value ?? value.laplacian_variance ?? value.horizontal_skew_pct ?? value.edge_density;
-  return numeric === undefined || numeric === null ? status : `${status} · ${String(numeric)}`;
-}
-
-function friendlyStatus(status: unknown) {
-  const value = String(status ?? "");
-  const labels: Record<string, string> = {
-    ok: "正常",
-    available: "可用",
-    completed: "已完成",
-    pending: "等待",
-    running: "运行中",
-    blocked: "已阻止",
-    failed: "失败",
-    unavailable: "不可用",
-    adapter_ready: "待接入",
-    backend_missing: "待接入",
-    needs_config: "待配置",
-  };
-  return labels[value] ?? (value || "等待");
-}
-
-function friendlyDisplayMode(mode?: string) {
-  const value = String(mode ?? "");
-  const labels: Record<string, string> = {
-    manual: "手动",
-    ambient: "环境亮度自适应",
-    calibration: "校准结果",
-  };
-  return labels[value] ?? (value || "-");
-}
-
-function compactDisplayPath(value?: string) {
-  const text = String(value ?? "");
-  if (!text) return "-";
-  const normalized = text.replace(/\\/g, "/");
-  const workspaceMarker = "/workspace/";
-  const workspaceIndex = normalized.lastIndexOf(workspaceMarker);
-  if (workspaceIndex >= 0) return normalized.slice(workspaceIndex + 1);
-  const parts = normalized.split("/").filter(Boolean);
-  if (parts.length <= 2) return normalized;
-  return `.../${parts.slice(-2).join("/")}`;
 }

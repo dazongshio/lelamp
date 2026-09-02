@@ -1,8 +1,9 @@
-import { AlertTriangle, CloudOff, Database, KeyRound, PackageCheck, Server, ShieldCheck } from "lucide-react";
+import { AlertTriangle, CloudOff, Database, KeyRound, PackageCheck, Server, ShieldCheck, Volume2, VolumeX } from "lucide-react";
 import { useEffect, useState } from "react";
 import { apiErrorMessage } from "../api/client";
 import { buildEnterpriseLocalPlatform, getEnterpriseLocalPlatformStatus, getEnterprisePolicy, getSecurity } from "../api/security";
 import { getServicesStatus } from "../api/services";
+import { getAudioSettings, updateAudioSettings, type AudioSettings } from "../api/settings";
 import type { EnterpriseLocalPlatformBuildResponse, EnterpriseLocalPlatformStatus, EnterprisePolicyStatus, SecurityStatus, ServiceStatus } from "../api/types";
 import { Card } from "../components/Card";
 import { ConfirmFlowCard } from "../components/ConfirmFlowCard";
@@ -20,22 +21,39 @@ export function SettingsPage() {
   const [services, setServices] = useState<ServiceStatus[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [audio, setAudio] = useState<AudioSettings | null>(null);
+  const [audioBusy, setAudioBusy] = useState(false);
 
   async function load() {
     setError("");
     try {
-      const [securityResult, servicesResult, enterpriseResult, platformResult] = await Promise.all([
+      const [securityResult, servicesResult, enterpriseResult, platformResult, audioResult] = await Promise.all([
         getSecurity(),
         getServicesStatus(),
         getEnterprisePolicy(),
         getEnterpriseLocalPlatformStatus(),
+        getAudioSettings(),
       ]);
       setSecurity(securityResult.data);
       setServices(servicesResult.data.services);
       setEnterprise(enterpriseResult.data);
       setLocalPlatform(platformResult.data);
+      setAudio(audioResult.data);
     } catch (err) {
       setError(apiErrorMessage(err));
+    }
+  }
+
+  async function changeAudio(settings: { volume?: number; muted?: boolean }) {
+    setAudioBusy(true);
+    setError("");
+    try {
+      const result = await updateAudioSettings(settings);
+      setAudio(result.data);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setAudioBusy(false);
     }
   }
 
@@ -63,6 +81,39 @@ export function SettingsPage() {
       <PageHeader title="设置" description="安全、权限与企业部署策略；默认只读，高风险变更需要分步确认" actions={<button className="ghost-button" onClick={() => void load()}>刷新配置</button>} />
       <div className="page-grid">
         {error && <div className="danger-panel">加载失败：{error}</div>}
+        <Card title="音量调节" subtitle="调节设备扬声器的系统输出音量">
+          <div className="audio-settings">
+            <button
+              className="audio-mute-button"
+              onClick={() => void changeAudio({ muted: !audio?.muted })}
+              disabled={audioBusy || !audio}
+              aria-label={audio?.muted ? "取消静音" : "静音"}
+            >
+              {audio?.muted ? <VolumeX size={22} /> : <Volume2 size={22} />}
+              <span>{audio?.muted ? "已静音" : "声音开启"}</span>
+            </button>
+            <input
+              aria-label="系统音量"
+              type="range"
+              min="0"
+              max="100"
+              step="1"
+              value={audio?.volume ?? 0}
+              disabled={audioBusy || !audio}
+              onChange={(event) => setAudio((current) => current ? { ...current, volume: Number(event.target.value), muted: false } : current)}
+              onPointerUp={(event) => void changeAudio({ volume: Number(event.currentTarget.value), muted: false })}
+              onKeyUp={(event) => void changeAudio({ volume: Number(event.currentTarget.value), muted: false })}
+            />
+            <strong className="audio-volume-value">{audio?.volume ?? "--"}%</strong>
+          </div>
+          <div className="audio-quick-actions">
+            {[25, 50, 75, 100].map((volume) => (
+              <button key={volume} className={audio?.volume === volume && !audio.muted ? "primary-button" : "ghost-button"} onClick={() => void changeAudio({ volume, muted: false })} disabled={audioBusy}>
+                {volume}%
+              </button>
+            ))}
+          </div>
+        </Card>
         <div className="warning-banner">
           <AlertTriangle size={20} />
           <div>
@@ -118,7 +169,7 @@ export function SettingsPage() {
                 <span>云端 AI</span><strong>{enterprise?.cloud_ai_enabled ?? security.cloud_ai_enabled ?? true ? "允许使用" : "企业策略禁用"}</strong>
                 <span>企业策略</span><strong>{enterprise?.policy_file_present ? "已配置" : "使用默认安全策略"}</strong>
                 <span>审计签名</span><strong>{enterprise?.audit_signing.key_configured ? "已配置" : "待配置"}</strong>
-                <span>LeLamp 版本</span><strong>v1.3.0</strong>
+                <span>智能台灯版本</span><strong>v1.3.0</strong>
                 <span>本地代理版本</span><strong>v0.5.2</strong>
               </div>
             </Card>
@@ -217,9 +268,9 @@ export function SettingsPage() {
               <Card title="输出文件">
                 <div className="definition-grid">
                   <span>平台目录</span><strong>{localPlatform?.platform_dir ?? "-"}</strong>
-                  <span>Manifest</span><strong>{platformBuild?.manifest_path ?? localPlatform?.manifest_path ?? "-"}</strong>
-                  <span>Bundle</span><strong>{platformBuild?.bundle_path ?? localPlatform?.latest_bundle ?? "-"}</strong>
-                  <span>Model Registry</span><strong>{platformBuild?.model_registry_path ?? localPlatform?.offline_model_registry ?? "-"}</strong>
+                  <span>清单文件</span><strong>{platformBuild?.manifest_path ?? localPlatform?.manifest_path ?? "-"}</strong>
+                  <span>软件包</span><strong>{platformBuild?.bundle_path ?? localPlatform?.latest_bundle ?? "-"}</strong>
+                  <span>模型注册表</span><strong>{platformBuild?.model_registry_path ?? localPlatform?.offline_model_registry ?? "-"}</strong>
                 </div>
               </Card>
             </div>

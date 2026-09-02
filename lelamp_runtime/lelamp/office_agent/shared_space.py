@@ -276,7 +276,7 @@ class SharedSpaceServer:
         httpd = ThreadingHTTPServer((host, port), self.make_handler())
         bound_host, bound_port = httpd.server_address[:2]
         url_host = "127.0.0.1" if bound_host in {"0.0.0.0", ""} else bound_host
-        local_url = f"http://{url_host}:{bound_port}/?token={urllib.parse.quote(self.token)}"
+        local_url = f"http://{url_host}:{bound_port}/"
         self.audit.record(
             "shared_space.start",
             target=local_url,
@@ -288,7 +288,7 @@ class SharedSpaceServer:
         )
         print(f"OpenClaw shared space: {local_url}")
         if bound_host == "0.0.0.0":
-            print(f"LAN URL: http://<raspberry-pi-ip>:{bound_port}/?token={self.token}")
+            print(f"LAN URL: http://<raspberry-pi-ip>:{bound_port}/")
         print(f"Shared inbox: {self.service.inbox_dir}")
         print("Press Ctrl+C to stop.")
         try:

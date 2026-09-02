@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from .audit import AuditLogger
 from .lelamp_voice_skill import parse_lamp_voice_command
 from .meeting_voice_skill import parse_meeting_voice_command
+from .remote_control import parse_remote_voice_command
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,17 @@ class OfficeIntentRouter:
                 summary="本地台灯语音控制命令",
                 action=lamp_command.action,
                 slots={"label": lamp_command.label},
+            )
+        remote_command = parse_remote_voice_command(original)
+        if remote_command is not None:
+            return IntentRoute(
+                intent="remote_control",
+                skill="remote_ssh_control",
+                confidence=0.9,
+                requires_confirmation=False,
+                summary="本地远程电脑 SSH 语音控制命令",
+                action=remote_command.action,
+                slots={"label": remote_command.label},
             )
         if self._has(
             normalized,

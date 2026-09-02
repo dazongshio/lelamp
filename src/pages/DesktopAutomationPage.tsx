@@ -404,8 +404,8 @@ export function DesktopAutomationPage() {
               )}
               {controlAction === "mouse_move" && (
                 <div className="grid-2">
-                  <label><span>X</span><input className="input" type="number" value={controlX} onChange={(event) => setControlX(Number(event.target.value))} /></label>
-                  <label><span>Y</span><input className="input" type="number" value={controlY} onChange={(event) => setControlY(Number(event.target.value))} /></label>
+                  <label><span>横坐标</span><input className="input" type="number" value={controlX} onChange={(event) => setControlX(Number(event.target.value))} /></label>
+                  <label><span>纵坐标</span><input className="input" type="number" value={controlY} onChange={(event) => setControlY(Number(event.target.value))} /></label>
                 </div>
               )}
               <button className="primary-button" onClick={() => void runControlAction()} disabled={busy}>门禁执行动作</button>
@@ -427,7 +427,7 @@ export function DesktopAutomationPage() {
 
         <Card title="安全约束">
           <div className="security-summary">
-            {(status?.safety ?? ["approved task required", "explicit authorization required", "workspace artifacts only"]).map((item) => <SkillChip key={item}>{item}</SkillChip>)}
+            {(status?.safety ?? ["approved task required", "explicit authorization required", "workspace artifacts only"]).map((item) => <SkillChip key={item}>{friendlySafety(item)}</SkillChip>)}
           </div>
         </Card>
       </div>
@@ -452,4 +452,13 @@ function friendlyStatus(status: unknown) {
     playwright_browser: "受控浏览器",
   };
   return labels[value] ?? (value || "等待");
+}
+
+function friendlySafety(value: string) {
+  const labels: Record<string, string> = {
+    "approved task required": "需要已批准的任务",
+    "explicit authorization required": "需要明确授权",
+    "workspace artifacts only": "仅允许使用工作区文件",
+  };
+  return labels[value] ?? "受安全策略约束";
 }

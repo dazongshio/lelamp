@@ -8,8 +8,11 @@ import type {
   AssistantProviderStatus,
   CameraStreamStatus,
   LeLampVoiceCommandResponse,
+  VoiceAssistantProcessStatus,
   VoiceCaptureResponse,
   VoiceConversationResponse,
+  VoiceRealtimeVoiceUpdateResponse,
+  VoiceRealtimeVoicesResponse,
   VoiceStatus,
 } from "./types";
 
@@ -132,6 +135,40 @@ export async function postAssistantPiVoiceOnce(options: { seconds?: number; page
 
 export async function getVoiceStatus(): Promise<ApiResult<VoiceStatus>> {
   const data = await request<VoiceStatus>("/api/voice/status");
+  return { data, source: "api" };
+}
+
+export async function getVoiceRealtimeVoices(): Promise<ApiResult<VoiceRealtimeVoicesResponse>> {
+  const data = await request<VoiceRealtimeVoicesResponse>("/api/voice/realtime/voices");
+  return { data, source: "api" };
+}
+
+export async function updateVoiceRealtimeVoice(voice: string): Promise<ApiResult<VoiceRealtimeVoiceUpdateResponse>> {
+  const data = await request<VoiceRealtimeVoiceUpdateResponse>("/api/voice/realtime/voice", {
+    method: "POST",
+    body: JSON.stringify({ voice }),
+  });
+  return { data, source: "api" };
+}
+
+export async function getVoiceAssistantStatus(): Promise<ApiResult<VoiceAssistantProcessStatus>> {
+  const data = await request<VoiceAssistantProcessStatus>("/api/voice/assistant/status");
+  return { data, source: "api" };
+}
+
+export async function startVoiceAssistant(options: { maxSeconds?: number } = {}): Promise<ApiResult<VoiceAssistantProcessStatus>> {
+  const data = await request<VoiceAssistantProcessStatus>("/api/voice/assistant/start", {
+    method: "POST",
+    body: JSON.stringify({ max_seconds: options.maxSeconds ?? 0 }),
+  });
+  return { data, source: "api" };
+}
+
+export async function stopVoiceAssistant(): Promise<ApiResult<VoiceAssistantProcessStatus>> {
+  const data = await request<VoiceAssistantProcessStatus>("/api/voice/assistant/stop", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
   return { data, source: "api" };
 }
 

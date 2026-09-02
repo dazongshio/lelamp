@@ -1,15 +1,10 @@
 import type { ApiEnvelope, ApiErrorPayload, ApiResult } from "./types";
 
 const TOKEN_KEY = "openclaw_console_token";
+const DOCUMENT_SESSION_KEY = "lelamp_document_session";
 const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env ?? {};
 const USE_MOCK_API = env.VITE_USE_MOCK_API === "true";
 const API_BASE = env.VITE_API_BASE_URL ?? "";
-
-declare global {
-  interface Window {
-    __LELAMP_CONSOLE_TOKEN__?: string;
-  }
-}
 
 export class ApiClientError extends Error {
   status: number;
@@ -31,11 +26,17 @@ export function useMockApiEnabled(): boolean {
 
 export function readToken(): string {
   const params = new URLSearchParams(window.location.search);
-  const injectedToken = window.__LELAMP_CONSOLE_TOKEN__?.trim() ?? "";
-  const token = params.get("token")?.trim() || injectedToken || localStorage.getItem(TOKEN_KEY) || "";
+  const token = params.get("token")?.trim() || localStorage.getItem(TOKEN_KEY) || "";
   if (token) {
     localStorage.setItem(TOKEN_KEY, token);
   }
+  return token;
+}
+
+export function readDocumentSession(): string {
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get("document_session")?.trim() || sessionStorage.getItem(DOCUMENT_SESSION_KEY) || "";
+  if (token) sessionStorage.setItem(DOCUMENT_SESSION_KEY, token);
   return token;
 }
 
@@ -58,10 +59,14 @@ function buildUrl(path: string): URL {
 
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = readToken();
+  const documentSession = readDocumentSession();
   const url = buildUrl(path);
   const headers = new Headers(init?.headers);
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
+  }
+  if (documentSession) {
+    headers.set("X-LeLamp-Document-Session", documentSession);
   }
   if (init?.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
@@ -114,6 +119,20 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiClientError(payload.error, response.status);
   }
   return (await response.text()) as T;
+}
+
+export async function requestBlob(path: string): Promise<Blob> {
+  const token = readToken();
+  const headers = new Headers();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const response = await fetch(buildUrl(path), { headers });
+  if (!response.ok) {
+    throw new ApiClientError(
+      { code: `http_${response.status}`, message: response.statusText || `HTTP ${response.status}`, details: {} },
+      response.status,
+    );
+  }
+  return response.blob();
 }
 
 export async function requestWithMock<T>(path: string, fallback: T, init?: RequestInit): Promise<ApiResult<T>> {

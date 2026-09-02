@@ -202,7 +202,7 @@ export function SharedSpacePage() {
             </div>
             <select className="select">
               <option>全部类型</option>
-              <option>PDF</option>
+              <option>可移植文档</option>
               <option>文本</option>
               <option>图片</option>
             </select>

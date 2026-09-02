@@ -119,7 +119,7 @@ class MeetingService:
         lines = [
             f"# {title}",
             "",
-            f"Started: {self._session.started_at}",
+            f"开始时间：{format_transcript_time(self._session.started_at)}",
             "",
             "## Participants",
             *[f"- {participant}" for participant in self._session.participants],
@@ -134,7 +134,7 @@ class MeetingService:
             *([f"- {item}" for item in action_items] or ["- 暂无明确待办，需要人工补充。"]),
             "",
             "## Transcript",
-            *[f"- [{item['timestamp']}] {item['speaker']}: {item['text']}" for item in transcript],
+            *[f"- [{format_transcript_time(item['timestamp'])}] {item['speaker']}: {item['text']}" for item in transcript],
             "",
         ]
         filename = safe_filename(title, default="meeting", suffix="_minutes.md")
@@ -264,6 +264,18 @@ def clean_transcript_items(items: list[dict[str, str]]) -> list[dict[str, str]]:
             }
         )
     return cleaned
+
+
+def format_transcript_time(value: str) -> str:
+    """Keep meeting turn timestamps compact while preserving two-digit seconds."""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    match = re.search(r"(?:T|\s)(\d{2}:\d{2}:\d{2})", text)
+    if match:
+        return match.group(1)
+    clock = re.fullmatch(r"(\d{2}:\d{2}:\d{2})(?:\.\d+)?", text)
+    return clock.group(1) if clock else text[:8]
 
 
 def is_binary_like_text(text: str) -> bool:
