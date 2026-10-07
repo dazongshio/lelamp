@@ -27,6 +27,7 @@ vite.config.d.ts
 docs/tingwu-live-credentials.md
 
 # Local runtime output
+/tmp/
 logs/
 *.log
 *.out

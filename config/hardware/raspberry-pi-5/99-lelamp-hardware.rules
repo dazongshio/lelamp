@@ -1,0 +1,6 @@
+# Managed by LeLamp hardware profile.
+# These aliases assume only one connected device of each VID/PID pair.
+# Motion controller: 1a86:55d3; this grants serial access, not motion permission.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="55d3", GROUP="dialout", MODE="0660", SYMLINK+="lelamp-servo"
+# CX-15 serial control board: CH340/CH341 1a86:7523.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", GROUP="dialout", MODE="0660", SYMLINK+="lelamp-projector"

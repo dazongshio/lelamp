@@ -1,0 +1,11 @@
+# LeLamp Pi 5 profile: merge these settings into /boot/firmware/config.txt.
+# Do not replace Ubuntu's complete config.txt or change os_prefix=current/.
+# Remove duplicate active imx219/imx290/vc4-kms-v3d overlays before adding this.
+[all]
+camera_auto_detect=0
+# Physical CAM0; IMX290 default clock, no software autofocus exposed.
+dtoverlay=imx290,cam0
+# Physical CAM1 is the default connector for this overlay.
+dtoverlay=imx219
+# Disable HDMI sound devices while keeping HDMI video.
+dtoverlay=vc4-kms-v3d,noaudio

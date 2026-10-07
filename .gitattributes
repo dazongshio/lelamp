@@ -1,0 +1,2 @@
+# Keep headerless pixel data byte-for-byte across line-ending settings.
+assets/hardware/*.rgb binary
