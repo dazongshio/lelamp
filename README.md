@@ -77,6 +77,8 @@ The verified Raspberry Pi 5 setup for IMX290/IMX219 cameras, A311 USB audio,
 servo access and the CX-15 projector is documented in
 [`硬件配置与验证说明`](./docs/hardware/raspberry-pi-5.md), with configuration
 templates in [`config/hardware/raspberry-pi-5`](./config/hardware/raspberry-pi-5/).
+Ubuntu boot layout, system services, device permissions and recovery are covered in
+[`系统配置与恢复`](./docs/hardware/system-configuration.md).
 
 ## Build Guide
 

@@ -1,0 +1,13 @@
+# Reference for Ubuntu's boot file layout; merge only after comparing the target.
+# Keep all unrelated target config.txt lines. Do not copy over the entire file.
+[all]
+os_prefix=current/
+[tryboot]
+os_prefix=new/
+[all]
+arm_64bit=1
+kernel=vmlinuz
+cmdline=cmdline.txt
+initramfs initrd.img followkernel
+# With os_prefix=current/, cmdline is /boot/firmware/current/cmdline.txt.
+# Camera/KMS settings are in the sibling ../boot-config.fragment.txt.

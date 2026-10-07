@@ -1,0 +1,103 @@
+{
+  "observed_date": "2026-10-07",
+  "timezone": "Asia/Shanghai",
+  "scope": "Public hardware and system settings; no credentials or full process environment",
+  "host": {
+    "model": "Raspberry Pi 5",
+    "os": "Ubuntu 26.04.1 LTS",
+    "architecture": "aarch64",
+    "kernel": "7.0.0-1020-raspi"
+  },
+  "boot": {
+    "config_file": "/boot/firmware/config.txt",
+    "normal_os_prefix": "current/",
+    "tryboot_os_prefix": "new/",
+    "normal_cmdline_file": "/boot/firmware/current/cmdline.txt",
+    "normal_kernel_file": "/boot/firmware/current/vmlinuz",
+    "normal_initramfs_file": "/boot/firmware/current/initrd.img",
+    "root_identifier": "omitted; preserve the target machine's existing root= value",
+    "camera_auto_detect": 0,
+    "camera_overlays": ["imx219", "imx290,cam0"],
+    "kms_overlay": "vc4-kms-v3d,noaudio",
+    "display_auto_detect": 1,
+    "disable_fw_kms_setup": 1,
+    "dtparams": ["audio=on", "i2c_arm=on", "spi=on", "watchdog=on"]
+  },
+  "services": {
+    "lelamp-web-console.service": {
+      "manager": "system",
+      "fragment": "/etc/systemd/system/lelamp-web-console.service",
+      "drop_ins": ["/etc/systemd/system/lelamp-web-console.service.d/30-audio-access.conf"],
+      "active_state": "active",
+      "unit_file_state": "enabled",
+      "user": "z",
+      "group": "z",
+      "supplementary_groups": ["dialout", "video", "audio"],
+      "working_directory": "/home/z/Project/lelamp-web",
+      "uv_binary": "/home/z/Project/lelamp-web/bin/uv",
+      "private_environment_file": "/home/z/Project/lelamp-web/console.env",
+      "private_environment_contents_exported": false,
+      "http_port": 8790,
+      "projection_preview_port": 8765,
+      "restart": "on-failure",
+      "restart_seconds": 3
+    },
+    "alsa-restore.service": {"active_state": "active", "unit_file_state": "static"},
+    "alsa-state.service": {"active_state": "inactive", "unit_file_state": "static"},
+    "alsa-utils.service": {"unit_file_state": "masked"},
+    "gdm.service": {"active_state": "inactive", "unit_file_state": "disabled"},
+    "workmate-device.service": {
+      "active_state": "active",
+      "unit_file_state": "enabled",
+      "user": "workmate",
+      "group": "workmate",
+      "supplementary_groups": ["audio", "video", "render"],
+      "role": "Existing separate device backend; configuration and credentials are not copied or changed"
+    }
+  },
+  "effective_web_hardware_environment": {
+    "LELAMP_PORT": "/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B79031190-if00",
+    "OPENCLAW_ENABLE_HARDWARE": "0",
+    "OPENCLAW_ENABLE_RGB": "0",
+    "OPENCLAW_MIC_DEVICE": "plughw:CARD=A311,DEV=0",
+    "OPENCLAW_SPEAKER_DEVICE": "plughw:CARD=A311,DEV=0",
+    "LELAMP_STARTUP_HOME": "0",
+    "TMPDIR": "/home/z/Project/lelamp-web/tmp",
+    "UV_CACHE_DIR": "/home/z/Project/lelamp-web/tmp/uv-cache"
+  },
+  "permissions": {
+    "ttyACM0": {"mode": "0660", "owner": "root", "group": "dialout"},
+    "ttyUSB0": {"mode": "0660", "owner": "root", "group": "dialout"},
+    "snd_controlC1": {"mode": "0660", "owner": "root", "group": "audio"},
+    "dri_card1": {"mode": "0660", "owner": "root", "group": "video"},
+    "z_account_membership": "z is not a member of dialout/video/audio; explicit system service groups provide access"
+  },
+  "audio": {
+    "alsa_card_name": "A311",
+    "device": "plughw:CARD=A311,DEV=0",
+    "pcm_playback_percent": 60,
+    "pcm_playback_raw_values": [88, 88],
+    "pcm_playback_enabled": true,
+    "mic_capture_raw_value": 147,
+    "mic_capture_enabled": true,
+    "auto_gain_control": false,
+    "etc_asound_conf_present": false,
+    "user_asoundrc_present": false,
+    "state_reference": "asound.A311.reference.state"
+  },
+  "projector": {
+    "native_display": "Exact CEA 1280x720 progressive 60 Hz, held by an existing temporary process",
+    "serial": "9600 8N1, continuously open in an existing temporary process",
+    "installation_orientation": "flip-both",
+    "dedicated_system_service_installed": false,
+    "automatic_power_toggle_configured": false,
+    "status_ack_available": false
+  },
+  "new_release_applied_to_live_system": false,
+  "notes": [
+    "The public hardware EnvironmentFile is a deployment target, not part of the observed live unit yet.",
+    "LELAMP_STARTUP_HOME=0 is read by StartupRuntimeMixin and skips startup homing; general motor writes remain disabled by OPENCLAW_ENABLE_HARDWARE=0.",
+    "Device indices and IDs in this snapshot are observations, not portable permanent assignments.",
+    "Do not replace cmdline root=, Ubuntu boot paths, installed kernel or initramfs from this reference."
+  ]
+}

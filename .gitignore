@@ -20,6 +20,7 @@ vite.config.d.ts
 .claude
 
 # Local secrets
+/console.env
 .env
 .env.*
 !.env.example

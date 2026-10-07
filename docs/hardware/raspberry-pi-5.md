@@ -2,6 +2,8 @@
 
 本配置对应 2026-10-07 实机验证的 LeLamp：两路 CSI 相机、Yundea A31-1 USB 音频、串口舵机和 CX-15/CXN0102 投影组件。配置使用树莓派本机 systemd、uv、ALSA、rpicam 和原生 DRM/KMS；临时文件放在项目根目录的 `tmp`。
 
+Ubuntu 启动链、系统/用户服务、权限、环境加载顺序及恢复操作见[系统配置与恢复](./system-configuration.md)。
+
 配置文件用于复现硬件连接和已验证参数。它不表示完整机械臂已可运动，也不表示相机已完成调焦或模型视觉能力已验证。发布包不包含登录密码、控制台访问令牌、模型 API 密钥、私人录音照片或供应商资料原件。
 
 需要的本机工具包括 uv、rpicam/libcamera、ALSA 工具、libdrm 与 systemd/udev；本次相机环境安装了 `rpicam-apps-core` 和 `libcamera-ipa`。新增配置/投影 Python 工具仅使用标准库及系统 `libdrm.so.2`，通过 `uv run` 执行。LeLamp 网页和原项目依赖仍按仓库既有安装方式准备；不要把这些独立工具能运行等同于整个网页应用已安装。
@@ -38,7 +40,7 @@ HDMI 的 `connected`、LeLamp 预览页在线或串口写入成功，都不能�
 | `assets/hardware/projector-test-card.rgb` | 1280×720 RGB 原始校准图，供显示工具读取 |
 | `assets/hardware/projector-test-card.jpg` | 同一校准图的可查看预览 |
 
-硬件环境模板不包含密钥，默认 `OPENCLAW_ENABLE_HARDWARE=0`、`OPENCLAW_ENABLE_RGB=0`。应用脚本安装的是提供的服务覆盖配置；只复制 `hardware.env.example` 不会使变量自动进入已有服务。改变接线或设备型号时，应同时核对模板、udev 规则和服务覆盖内容。
+硬件环境模板不包含密钥，默认 `OPENCLAW_ENABLE_HARDWARE=0`、`OPENCLAW_ENABLE_RGB=0`。应用脚本将公开硬件环境安装为 `/etc/lelamp/hardware.env`，并通过服务覆盖配置的后加载 `EnvironmentFile` 引入；只复制 `hardware.env.example` 不会使变量自动进入已有服务。环境文件优先级和原私密配置保留方式见系统说明。改变接线或设备型号时，应同时核对模板、udev 规则和服务覆盖内容。
 
 应用配置前先检查当前 `/boot/firmware/config.txt`、服务覆盖配置和 udev 规则，并保留项目 `tmp` 下的备份。boot 片段应合并到 Pi 5 生效的段落；不要覆盖其他设备的启动配置。默认仅预览差异，在树莓派的仓库根目录执行。先指定实际已安装的 uv 路径；不下载或提交 uv 二进制到硬件配置仓库。当前调试机器的 uv 位于另一个部署目录，进入此仓库后先运行：
 
@@ -52,13 +54,13 @@ export LELAMP_UV_BIN=/home/z/Project/lelamp-web/bin/uv
 mkdir -p "$PWD/tmp"
 LELAMP_UV_BIN="${LELAMP_UV_BIN:-$PWD/bin/uv}"
 test -x "$LELAMP_UV_BIN" || LELAMP_UV_BIN="$(command -v uv)"
-TMPDIR="$PWD/tmp" UV_CACHE_DIR="$PWD/tmp/uv-cache" "$LELAMP_UV_BIN" run --no-project python scripts/hardware/apply_profile.py
+TMPDIR="$PWD/tmp" UV_CACHE_DIR="$PWD/tmp/uv-cache" PYTHONDONTWRITEBYTECODE=1 "$LELAMP_UV_BIN" run --no-project python scripts/hardware/apply_profile.py
 ```
 
 核对预览与实物一致后再应用：
 
 ```sh
-sudo env TMPDIR="$PWD/tmp" UV_CACHE_DIR="$PWD/tmp/uv-cache" "$LELAMP_UV_BIN" run --no-project python scripts/hardware/apply_profile.py --apply
+sudo env TMPDIR="$PWD/tmp" UV_CACHE_DIR="$PWD/tmp/uv-cache" PYTHONDONTWRITEBYTECODE=1 "$LELAMP_UV_BIN" run --no-project python scripts/hardware/apply_profile.py --apply
 ```
 
 脚本检查目标为 Raspberry Pi 5、A311 PCM 控制与必要系统工具。遇到生效的 `include` 或无法判定的条件段时停止，要求人工核对；保留 Ubuntu 的 `os_prefix` 与非 Pi 5 条件配置。修改前备份写入项目 `tmp/hardware-profile-backup-时间/`。
@@ -93,10 +95,10 @@ dtoverlay=imx219
 ```sh
 mkdir -p "$PWD/tmp/camera-check"
 export TMPDIR="$PWD/tmp/camera-check"
-rpicam-still --list-cameras
-rpicam-still --list-cameras -v 2
-rpicam-still --camera 0 -n -t 1000 --width 1024 --height 768 -o "$PWD/tmp/camera-check/camera0.jpg"
-rpicam-still --camera 1 -n -t 1000 --width 1024 --height 768 -o "$PWD/tmp/camera-check/camera1.jpg"
+sudo env TMPDIR="$PWD/tmp/camera-check" rpicam-still --list-cameras
+sudo env TMPDIR="$PWD/tmp/camera-check" rpicam-still --list-cameras -v 2
+sudo env TMPDIR="$PWD/tmp/camera-check" rpicam-still --camera 0 -n -t 1000 --width 1024 --height 768 -o "$PWD/tmp/camera-check/camera0.jpg"
+sudo env TMPDIR="$PWD/tmp/camera-check" rpicam-still --camera 1 -n -t 1000 --width 1024 --height 768 -o "$PWD/tmp/camera-check/camera1.jpg"
 ```
 
 上面的索引仅适用于列表仍显示本机映射的情况。原 LeLamp `camera_observer.py` 使用 rpicam/libcamera 单帧拍照；网页 `POST /api/hardware/test` 可分别传入 `{"test":"camera","camera_index":0}` 和 `{"test":"camera","camera_index":1}`。使用网页测试时沿用控制台正常认证，不在命令或公共文档中写入访问令牌。
@@ -136,9 +138,10 @@ OPENCLAW_SPEAKER_DEVICE=plughw:CARD=A311,DEV=0
 ```sh
 aplay -l
 arecord -l
-amixer -c A311 sget PCM
-amixer -c A311 sset PCM 60%
-sudo alsactl store
+sudo amixer -c A311 sget PCM
+sudo amixer -c A311 sset PCM 60% unmute
+sudo alsactl store A311
+sudo alsactl restore A311
 ```
 
 在项目根目录做短时录音/播放测试；播放会发声：
@@ -146,8 +149,8 @@ sudo alsactl store
 ```sh
 mkdir -p "$PWD/tmp/audio-check"
 export TMPDIR="$PWD/tmp/audio-check"
-arecord -D plughw:CARD=A311,DEV=0 -r 16000 -c 1 -f S16_LE -d 3 "$PWD/tmp/audio-check/microphone.wav"
-aplay -D plughw:CARD=A311,DEV=0 "$PWD/tmp/audio-check/microphone.wav"
+sudo env TMPDIR="$PWD/tmp/audio-check" arecord -D plughw:CARD=A311,DEV=0 -r 16000 -c 1 -f S16_LE -d 3 "$PWD/tmp/audio-check/microphone.wav"
+sudo env TMPDIR="$PWD/tmp/audio-check" aplay -D plughw:CARD=A311,DEV=0 "$PWD/tmp/audio-check/microphone.wav"
 ```
 
 原 LeLamp 音频测试和网页默认麦克风/扬声器测试均已完成。麦克风录到非静音信号不等于语音识别质量已经验证；当前云端模型连接、语音识别和视觉推理不在硬件出入接口验证范围内。
@@ -268,7 +271,7 @@ mkdir -p "$PWD/tmp"
 LELAMP_UV_BIN="${LELAMP_UV_BIN:-$PWD/bin/uv}"
 test -x "$LELAMP_UV_BIN" || LELAMP_UV_BIN="$(command -v uv)"
 lelamp_hardware_run() {
-  sudo env TMPDIR="$PWD/tmp" UV_CACHE_DIR="$PWD/tmp/uv-cache" "$LELAMP_UV_BIN" run --no-project python "$@"
+  sudo env TMPDIR="$PWD/tmp" UV_CACHE_DIR="$PWD/tmp/uv-cache" PYTHONDONTWRITEBYTECODE=1 "$LELAMP_UV_BIN" run --no-project python "$@"
 }
 ```
 
@@ -368,10 +371,10 @@ flip-both，参数 00：ff 07 37 00 00 00 00 3e
 
 ```sh
 mkdir -p "$PWD/tmp"
-TMPDIR="$PWD/tmp" UV_CACHE_DIR="$PWD/tmp/uv-cache" "$LELAMP_UV_BIN" run --no-project python -m unittest discover -s tests/hardware -v
+TMPDIR="$PWD/tmp" UV_CACHE_DIR="$PWD/tmp/uv-cache" PYTHONDONTWRITEBYTECODE=1 "$LELAMP_UV_BIN" run --no-project python -m unittest discover -s tests/hardware -v
 ```
 
-发布前已在本地和目标树莓派执行，40 项软件测试全部通过，覆盖配置合并、默认只读、精确视频时序、像素转换、资源清理、套接字与串口命令处理。树莓派上还完成配置预览、DRM 只读检查及原生 libdrm 绑定检查；当前活动时序读回为标准 CEA 720p60。新工具没有接管现有显示或串口进程。
+发布前已在本地和目标树莓派执行，44 项软件测试全部通过，覆盖配置合并、默认只读、精确视频时序、像素转换、资源清理、套接字与串口命令处理。树莓派上还完成配置预览、DRM 只读检查及原生 libdrm 绑定检查；当前活动时序读回为标准 CEA 720p60。新工具没有接管现有显示或串口进程。
 
 通过软件测试不等于新脚本已在现场完成光学出图，也不代替相机拍照、扬声器试听、RGB 接线/点亮或机械臂校准验证。
 

@@ -6,6 +6,7 @@ from io import StringIO
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -13,6 +14,9 @@ IMPLEMENTATION = ROOT / "scripts/hardware/apply_profile.py"
 
 
 class BootProfileTest(unittest.TestCase):
+    def setUp(self):
+        (ROOT / "tmp").mkdir(exist_ok=True)
+
     @classmethod
     def setUpClass(cls):
         if not IMPLEMENTATION.is_file():
@@ -103,6 +107,54 @@ class BootProfileTest(unittest.TestCase):
             self.assertEqual(result, 0)
             self.assertIn("Preview only", output.getvalue())
             self.assertEqual(target.read_text(), original)
+
+    def test_hardware_env_is_installed_as_final_environment_file(self):
+        with tempfile.TemporaryDirectory(dir=ROOT / "tmp") as directory:
+            boot = Path(directory) / "config.txt"
+            boot.write_text("[all]\nos_prefix=current/\n")
+            target = Path(directory) / "hardware.env"
+            with patch.object(self.profile, "SYSTEM_HARDWARE_ENV", target, create=True):
+                planned = dict(self.profile.plan_files(boot))
+            self.assertIn(target, planned)
+            self.assertIn(self.profile.MANAGED, planned[target])
+            for setting in ("OPENCLAW_ENABLE_HARDWARE=0", "OPENCLAW_ENABLE_RGB=0", "LELAMP_STARTUP_HOME=0"):
+                self.assertIn(setting, planned[target])
+            dropin = planned[Path("/etc/systemd/system/lelamp-web-console.service.d/90-lelamp-hardware.conf")]
+            self.assertIn("EnvironmentFile=/etc/lelamp/hardware.env", dropin)
+            self.assertNotIn("Environment=\"OPENCLAW_ENABLE_HARDWARE", dropin)
+
+    def test_unmanaged_hardware_environment_is_not_overwritten(self):
+        with tempfile.TemporaryDirectory(dir=ROOT / "tmp") as directory:
+            boot = Path(directory) / "config.txt"
+            boot.write_text("[all]\n")
+            target = Path(directory) / "hardware.env"
+            target.write_text("OPENCLAW_ENABLE_HARDWARE=1\n")
+            with patch.object(self.profile, "SYSTEM_HARDWARE_ENV", target, create=True):
+                with self.assertRaisesRegex(ValueError, "unmanaged"):
+                    self.profile.plan_files(boot)
+            self.assertEqual(target.read_text(), "OPENCLAW_ENABLE_HARDWARE=1\n")
+
+    def test_preview_does_not_update_existing_managed_hardware_environment(self):
+        with tempfile.TemporaryDirectory(dir=ROOT / "tmp") as directory:
+            boot = Path(directory) / "config.txt"
+            boot.write_text("[all]\n")
+            target = Path(directory) / "hardware.env"
+            original = self.profile.MANAGED + "\nOPENCLAW_ENABLE_HARDWARE=1\n"
+            target.write_text(original)
+            output = StringIO()
+            with patch.object(self.profile, "SYSTEM_HARDWARE_ENV", target, create=True), redirect_stdout(output):
+                result = self.profile.main(["--boot-config", str(boot)])
+            self.assertEqual(result, 0)
+            self.assertIn("hardware.env", output.getvalue())
+            self.assertEqual(target.read_text(), original)
+
+    def test_system_service_reads_private_environment_before_hardware_profile(self):
+        template = ROOT / "config/hardware/raspberry-pi-5/system/lelamp-web-console.service.example"
+        self.assertTrue(template.is_file(), "System service template is not implemented")
+        unit = template.read_text()
+        self.assertLess(unit.index("EnvironmentFile=/home/z/Project/lelamp-web/console.env"), unit.index("EnvironmentFile=/etc/lelamp/hardware.env"))
+        self.assertIn("User=z\nGroup=z\n", unit)
+        self.assertIn("/bin/uv run --offline --no-sync", unit)
 
 
 if __name__ == "__main__":

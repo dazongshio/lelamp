@@ -18,6 +18,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[2]
 PROFILE = ROOT / "config/hardware/raspberry-pi-5"
+SYSTEM_HARDWARE_ENV = Path("/etc/lelamp/hardware.env")
 BEGIN = "# BEGIN LELAMP PI5 HARDWARE PROFILE"
 END = "# END LELAMP PI5 HARDWARE PROFILE"
 MANAGED = "# Managed by LeLamp hardware profile."
@@ -106,6 +107,8 @@ def plan_files(boot_config):
         (boot_config, merge_boot_config(original)),
         (Path("/etc/udev/rules.d/99-lelamp-hardware.rules"),
          (PROFILE / "99-lelamp-hardware.rules").read_text(encoding="utf-8")),
+        (SYSTEM_HARDWARE_ENV,
+         (PROFILE / "hardware.env.example").read_text(encoding="utf-8")),
         (Path("/etc/systemd/system/lelamp-web-console.service.d/90-lelamp-hardware.conf"),
          (PROFILE / "lelamp-web-console.conf").read_text(encoding="utf-8")),
     ]

@@ -1,0 +1,23 @@
+# System service for the verified deployment; not the repository's user unit.
+# Adjust all /home/z/Project/lelamp-web paths and User/Group together if needed.
+# This file is an example; apply_profile.py does not replace the base service.
+[Unit]
+Description=LeLamp web console
+After=network.target
+
+[Service]
+Type=simple
+User=z
+Group=z
+SupplementaryGroups=dialout video audio
+WorkingDirectory=/home/z/Project/lelamp-web
+# Local authentication/API settings remain private and are not in Git.
+EnvironmentFile=/home/z/Project/lelamp-web/console.env
+# The later public file wins for hardware switches and device selection.
+EnvironmentFile=/etc/lelamp/hardware.env
+ExecStart=/home/z/Project/lelamp-web/bin/uv run --offline --no-sync --project /home/z/Project/lelamp-web --directory /home/z/Project/lelamp-web/lelamp_runtime openclaw_cli.py web-console --host 0.0.0.0 --port 8790 --projection-preview-port 8765
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

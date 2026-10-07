@@ -1,0 +1,11 @@
+# Observed on the target Pi on 2026-10-07; versions are a reference, not a pin.
+# OS: Ubuntu 26.04.1 LTS (Resolute Raccoon), aarch64
+# Kernel: 7.0.0-1020-raspi
+alsa-utils 1.2.15.2-1ubuntu1
+libcamera-ipa:arm64 0.7.0-1ubuntu2
+libdrm2:arm64 2.4.131-1
+rpicam-apps-core 1.11.1-1ubuntu2
+systemd 259.5-0ubuntu3.4
+udev 259.5-0ubuntu3.4
+# uv is an existing project-local binary, not a dpkg-managed package.
+uv 0.12.23 (aarch64-unknown-linux-gnu)
